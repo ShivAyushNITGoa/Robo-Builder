@@ -1,0 +1,8 @@
+{
+  "name": "Remix: Robo Builder",
+  "description": "A casual puzzle and build-and-watch game where you construct the perfect robot to complete challenging missions automatically.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
