@@ -52,10 +52,14 @@ import com.example.engine.three_d.VectorMath
 import com.example.engine.three_d.CuboidRenderer.draw3DCuboid
 import com.example.ui.components.TelemetryDashboard
 import com.example.ui.components.CockpitControls
+import com.example.ui.components.ThreeRobotViewer
+import com.example.ui.components.ThreeGameplayViewer
+import com.example.ui.components.SpaceStarfieldBackground
 import com.example.ui.components.ParticleSystem.drawSimParticles
 import com.example.ui.components.PartSpecifications.getPartSpecDescription
 import com.example.ui.screens.AchievementsScreen
 import com.example.ui.screens.DailyChallengeScreen
+import com.example.ui.screens.SpaceshipTasksScreen
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.cos
@@ -151,6 +155,9 @@ fun GameAppContent(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            // Among Us inspired scrolling space starfield
+            SpaceStarfieldBackground()
+
             when (currentScreen) {
                 Screen.Menu -> MenuScreen(viewModel, userProfile)
                 Screen.LevelSelect -> LevelSelectScreen(viewModel, levelProgress)
@@ -161,6 +168,7 @@ fun GameAppContent(
                 Screen.CustomLevelSelect -> CustomLevelSelectScreen(viewModel)
                 Screen.CustomLevelPlay -> CustomLevelPlayScreen(viewModel, userProfile)
                 Screen.CustomLevelEditor -> CustomLevelEditorScreen(viewModel)
+                Screen.SpaceshipTasks -> SpaceshipTasksScreen(viewModel)
             }
         }
     }
@@ -410,6 +418,50 @@ fun MenuScreen(
         }
 
         item {
+            Button(
+                onClick = { viewModel.onScreenChanged(Screen.SpaceshipTasks) },
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFFF1744)), // Among Us Red!
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(56.dp)
+                    .testTag("play_spaceship_tasks_button"),
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Report,
+                        contentDescription = "Spaceship Tasks",
+                        tint = Color.White,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Text(
+                        text = "SPACESHIP TASKS",
+                        color = Color.White,
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace
+                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(Color(0xFFFFEA00)) // Glowing yellow badge
+                            .padding(horizontal = 4.dp, vertical = 2.dp)
+                    ) {
+                        Text(
+                            text = "NEW",
+                            color = Color.Black,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Black
+                        )
+                    }
+                }
+            }
+        }
+
+        item {
             OutlinedButton(
                 onClick = { viewModel.onScreenChanged(Screen.DailyChallenge) },
                 border = BorderStroke(1.5.dp, CyberBlue),
@@ -647,6 +699,7 @@ fun GamePlayScreen(
 
     // Active Slot highlighters
     var activeSlot by remember { mutableStateOf<SlotType?>(null) }
+    var playIn3D by remember { mutableStateOf(true) }
 
     Column(
         modifier = Modifier
@@ -702,34 +755,62 @@ fun GamePlayScreen(
             }
         }
 
-        // Live Simulation Canvas
+        // Simulator Mode Toggle Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "SIMULATOR STREAM",
+                color = CyberBlue,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace
+            )
+            
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(CyberSteel)
+                    .padding(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(false to "2D Hologram", true to "Immersive 3D").forEach { (is3D, label) ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (playIn3D == is3D) CyberBlue else Color.Transparent)
+                            .clickable { playIn3D = is3D }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (playIn3D == is3D) CyberWhite else CyberGray,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
+
+        // Live Simulation Card / WebGL Box
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(220.dp)
+                .height(240.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .border(1.5.dp, CyberIron, RoundedCornerShape(12.dp))
+                .border(1.5.dp, if (playIn3D) CyberBlue else CyberIron, RoundedCornerShape(12.dp))
                 .background(Color(0xFF070A13))
         ) {
-            // Background Canvas drawing
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            viewModel.modelRotationAngleY += dragAmount.x * 0.015f
-                            viewModel.modelRotationAngleX -= dragAmount.y * 0.015f
-                        }
-                    }
-            ) {
-                drawSimulationWorldBackground(level.worldName)
-                
-                // Draw Level Obstacles
-                drawWorldObstacles(level.hazardType, viewModel.simulationProgress, viewModel.simulationState)
-                
-                // Draw custom robot configuration
-                drawRobotChassis(
+            if (playIn3D) {
+                ThreeGameplayViewer(
+                    robotX = 0f,
+                    robotY = if (viewModel.selectedLegs == "Hover Engine" || viewModel.selectedLegs == "Jetpack") 10f else 0f,
+                    robotZ = (1f - viewModel.simulationProgress) * 400f - 200f,
+                    speed = if (viewModel.simulationState == SimulationState.Running) 1.5f else 0f,
                     paintColor = profile?.selectedPaint ?: "#3D5AFE",
                     eyesType = profile?.selectedEyes ?: "digital",
                     hatType = profile?.selectedHat ?: "none",
@@ -737,15 +818,50 @@ fun GamePlayScreen(
                     leftArm = viewModel.selectedLeftArm,
                     rightArm = viewModel.selectedRightArm,
                     utility = viewModel.selectedUtility,
+                    hazardType = level.hazardType,
                     progress = viewModel.simulationProgress,
-                    state = viewModel.simulationState,
-                    rotX = viewModel.modelRotationAngleX,
-                    rotY = viewModel.modelRotationAngleY,
-                    cameraShake = viewModel.cameraShakeAmount
+                    simulationState = viewModel.simulationState,
+                    modifier = Modifier.fillMaxSize()
                 )
-                
-                // Draw custom spark/exhaust particles
-                drawSimParticles(viewModel.particles)
+            } else {
+                // Background Canvas drawing
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                viewModel.modelRotationAngleY += dragAmount.x * 0.015f
+                                viewModel.modelRotationAngleX -= dragAmount.y * 0.015f
+                            }
+                        }
+                ) {
+                    drawSimulationWorldBackground(level.worldName)
+                    
+                    // Draw Level Obstacles
+                    drawWorldObstacles(level.hazardType, viewModel.simulationProgress, viewModel.simulationState)
+                    
+                    // Draw custom robot configuration
+                    drawRobotChassis(
+                        paintColor = profile?.selectedPaint ?: "#3D5AFE",
+                        eyesType = profile?.selectedEyes ?: "digital",
+                        hatType = profile?.selectedHat ?: "none",
+                        legs = viewModel.selectedLegs,
+                        leftArm = viewModel.selectedLeftArm,
+                        rightArm = viewModel.selectedRightArm,
+                        utility = viewModel.selectedUtility,
+                        progress = viewModel.simulationProgress,
+                        state = viewModel.simulationState,
+                        rotX = viewModel.modelRotationAngleX,
+                        rotY = viewModel.modelRotationAngleY,
+                        cameraShake = viewModel.cameraShakeAmount,
+                        headStyle = viewModel.headStyle,
+                        torsoStyle = viewModel.torsoStyle
+                    )
+                    
+                    // Draw custom spark/exhaust particles
+                    drawSimParticles(viewModel.particles)
+                }
             }
 
             // Top Status Bar Overlay
@@ -1288,6 +1404,7 @@ fun CustomizationScreen(
     profile: UserProfile?
 ) {
     var activeTab by remember { mutableStateOf("paint") }
+    var useThreeDView by remember { mutableStateOf(true) }
     val coroutineScope = rememberCoroutineScope()
 
     val paints = listOf(
@@ -1309,7 +1426,13 @@ fun CustomizationScreen(
         "Slick Bald" to "none" to 0,
         "Constructor Hat" to "builder" to 50,
         "Dapper Top Hat" to "top_hat" to 100,
-        "Imperial Crown" to "builder_crown" to 250
+        "Imperial Crown" to "builder_crown" to 250,
+        "Green Sprout" to "sprout" to 30,
+        "Toilet Paper" to "toilet_paper" to 40,
+        "Fried Egg" to "egg" to 60,
+        "Sticky Note" to "sticky_note" to 25,
+        "Red Cherry" to "cherry" to 45,
+        "Toilet Plunger" to "plunger" to 75
     )
 
     Column(
@@ -1318,65 +1441,259 @@ fun CustomizationScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        Text(
-            text = "ROBOT GARAGE",
-            color = CyberWhite,
-            fontSize = 20.sp,
-            fontWeight = FontWeight.Black,
-            fontFamily = FontFamily.Monospace
-        )
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "ROBOT GARAGE",
+                color = CyberWhite,
+                fontSize = 20.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace
+            )
+
+            // Dynamic 3D/2D Visualizer Mode Selector
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(20.dp))
+                    .background(Color(0xFF151B33))
+                    .padding(4.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(false to "2D DIAGRAM", true to "3D LAB").forEach { (is3D, label) ->
+                    val isSelected = useThreeDView == is3D
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(if (isSelected) CyberBlue else Color.Transparent)
+                            .clickable { useThreeDView = is3D }
+                            .padding(horizontal = 12.dp, vertical = 6.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (isSelected) CyberWhite else CyberGray,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
 
         // Live Customization Preview Card
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(180.dp)
+                .height(220.dp)
                 .clip(RoundedCornerShape(12.dp))
                 .border(1.5.dp, CyberIron, RoundedCornerShape(12.dp))
                 .background(Color(0xFF0C101F)),
             contentAlignment = Alignment.Center
         ) {
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            viewModel.modelRotationAngleY += dragAmount.x * 0.015f
-                            viewModel.modelRotationAngleX -= dragAmount.y * 0.015f
-                        }
-                    }
-            ) {
-                drawRobotChassis(
+            if (useThreeDView) {
+                ThreeRobotViewer(
                     paintColor = profile?.selectedPaint ?: "#3D5AFE",
                     eyesType = profile?.selectedEyes ?: "digital",
                     hatType = profile?.selectedHat ?: "none",
-                    legs = "Wheels",
-                    leftArm = "Empty",
-                    rightArm = "Empty",
-                    utility = "Empty",
-                    progress = 0.5f,
-                    state = SimulationState.Idle,
-                    rotX = viewModel.modelRotationAngleX,
-                    rotY = viewModel.modelRotationAngleY
+                    legs = viewModel.selectedLegs,
+                    leftArm = viewModel.selectedLeftArm,
+                    rightArm = viewModel.selectedRightArm,
+                    utility = viewModel.selectedUtility,
+                    headStyle = viewModel.headStyle,
+                    headMaterial = viewModel.headMaterial,
+                    torsoStyle = viewModel.torsoStyle,
+                    torsoMaterial = viewModel.torsoMaterial,
+                    armsStyle = viewModel.armsStyle,
+                    armsMaterial = viewModel.armsMaterial,
+                    legsStyle = viewModel.legsStyle,
+                    legsMaterial = viewModel.legsMaterial,
+                    activeAnimation = viewModel.activeAnimation,
+                    isAnimating = viewModel.isAnimating,
+                    modifier = Modifier.fillMaxSize()
                 )
+            } else {
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                viewModel.modelRotationAngleY += dragAmount.x * 0.015f
+                                viewModel.modelRotationAngleX -= dragAmount.y * 0.015f
+                            }
+                        }
+                ) {
+                    drawRobotChassis(
+                        paintColor = profile?.selectedPaint ?: "#3D5AFE",
+                        eyesType = profile?.selectedEyes ?: "digital",
+                        hatType = profile?.selectedHat ?: "none",
+                        legs = viewModel.selectedLegs,
+                        leftArm = viewModel.selectedLeftArm,
+                        rightArm = viewModel.selectedRightArm,
+                        utility = viewModel.selectedUtility,
+                        progress = 0.5f,
+                        state = SimulationState.Idle,
+                        rotX = viewModel.modelRotationAngleX,
+                        rotY = viewModel.modelRotationAngleY,
+                        headStyle = viewModel.headStyle,
+                        torsoStyle = viewModel.torsoStyle
+                    )
+                }
+            }
+        }
+
+        // Real-time Performance Statistics Panel
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1324)),
+            border = BorderStroke(1.dp, CyberIron),
+            shape = RoundedCornerShape(10.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text(
+                    text = "REAL-TIME PERFORMANCE TELEMETRY",
+                    color = CyberBlue,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.padding(bottom = 4.dp)
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    val customWeight = viewModel.getCustomWeight()
+                    val customPower = viewModel.getCustomPower()
+                    val customEfficiency = viewModel.getCustomEfficiency()
+
+                    // 1. Weight Stat
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF161C33))
+                            .padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FitnessCenter,
+                            contentDescription = "Weight",
+                            tint = CyberLime,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "WEIGHT",
+                            color = CyberGray,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "${customWeight} kg",
+                            color = CyberWhite,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    // 2. Energy Consumption Stat
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF161C33))
+                            .padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Bolt,
+                            contentDescription = "Energy Consumption",
+                            tint = CyberOrange,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "ENERGY COST",
+                            color = CyberGray,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "${customPower} W",
+                            color = CyberWhite,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+
+                    // 3. Efficiency Stat
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFF161C33))
+                            .padding(8.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Speed,
+                            contentDescription = "Efficiency",
+                            tint = CyberBlue,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = "EFFICIENCY",
+                            color = CyberGray,
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                        Text(
+                            text = "${customEfficiency}%",
+                            color = if (customEfficiency > 75) CyberLime else if (customEfficiency > 45) CyberBlue else CyberRed,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Black,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
             }
         }
 
         // Shop tab switchers
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            listOf("paint" to "PAINT", "eyes" to "EYES", "hat" to "HATS").forEach { (tabId, tabLabel) ->
+            listOf(
+                "paint" to "PAINT",
+                "eyes" to "EYES",
+                "hat" to "HATS",
+                "parts" to "PARTS",
+                "assembly" to "ASSEMBLY",
+                "anim" to "ANIMATE"
+            ).forEach { (tabId, tabLabel) ->
                 val isSelected = activeTab == tabId
                 Box(
                     modifier = Modifier
-                        .weight(1f)
                         .clip(RoundedCornerShape(8.dp))
                         .background(if (isSelected) CyberBlue else CyberSteel)
                         .clickable { activeTab = tabId }
-                        .padding(vertical = 10.dp),
+                        .padding(horizontal = 16.dp, vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
@@ -1472,6 +1789,260 @@ fun CustomizationScreen(
                         }
                     }
                 }
+                "parts" -> {
+                    val headStyleOptions = listOf("Standard Dome", "Stealth Visor", "Retro Lens", "Monocular Laser", "Crewmate Visor")
+                    val torsoStyleOptions = listOf("Fusion Frame", "Shielded Carapace", "Minimal Chassis", "Crewmate Suit")
+                    val materialOptions = listOf("Chrome Metal", "Golden Cyber", "Carbon Fiber", "Rusty Scrapyard", "Neon Grid", "Crewmate Cel")
+
+                    item {
+                        CycleSettingRow(
+                            label = "HEAD STYLE",
+                            currentValue = viewModel.headStyle,
+                            options = headStyleOptions,
+                            icon = Icons.Default.Category
+                        ) { viewModel.headStyle = it }
+                    }
+                    item {
+                        CycleSettingRow(
+                            label = "HEAD MATERIAL",
+                            currentValue = viewModel.headMaterial,
+                            options = materialOptions,
+                            icon = Icons.Default.Palette
+                        ) { viewModel.headMaterial = it }
+                    }
+                    item {
+                        CycleSettingRow(
+                            label = "TORSO STYLE",
+                            currentValue = viewModel.torsoStyle,
+                            options = torsoStyleOptions,
+                            icon = Icons.Default.Category
+                        ) { viewModel.torsoStyle = it }
+                    }
+                    item {
+                        CycleSettingRow(
+                            label = "TORSO MATERIAL",
+                            currentValue = viewModel.torsoMaterial,
+                            options = materialOptions,
+                            icon = Icons.Default.Palette
+                        ) { viewModel.torsoMaterial = it }
+                    }
+                    item {
+                        CycleSettingRow(
+                            label = "ARMS MATERIAL",
+                            currentValue = viewModel.armsMaterial,
+                            options = materialOptions,
+                            icon = Icons.Default.Palette
+                        ) { viewModel.armsMaterial = it }
+                    }
+                    item {
+                        CycleSettingRow(
+                            label = "LEGS MATERIAL",
+                            currentValue = viewModel.legsMaterial,
+                            options = materialOptions,
+                            icon = Icons.Default.Palette
+                        ) { viewModel.legsMaterial = it }
+                    }
+                }
+                "assembly" -> {
+                    val legsOptions = listOf("Wheels", "Tank Tracks", "Spider Legs", "Hover Engine", "Jump Springs", "Jetpack")
+                    val armOptions = listOf("Empty", "Grabber", "Magnet", "Hammer", "Drill", "Welding Torch", "Shield Arm")
+                    val utilityOptions = listOf("Empty", "Battery Pack", "Turbo Battery", "Cooling System", "Object Detector", "Heat Sensor")
+
+                    item {
+                        CycleSettingRow(
+                            label = "LEGS MODULE",
+                            currentValue = viewModel.selectedLegs,
+                            options = legsOptions,
+                            icon = Icons.Default.DirectionsRun
+                        ) { viewModel.selectPart(SlotType.Leg, it) }
+                    }
+                    item {
+                        CycleSettingRow(
+                            label = "LEFT ARM MODULE",
+                            currentValue = viewModel.selectedLeftArm,
+                            options = armOptions,
+                            icon = Icons.Default.BackHand
+                        ) { viewModel.selectPart(SlotType.LeftArm, it) }
+                    }
+                    item {
+                        CycleSettingRow(
+                            label = "RIGHT ARM MODULE",
+                            currentValue = viewModel.selectedRightArm,
+                            options = armOptions,
+                            icon = Icons.Default.FrontHand
+                        ) { viewModel.selectPart(SlotType.RightArm, it) }
+                    }
+                    item {
+                        CycleSettingRow(
+                            label = "UTILITY MODULE",
+                            currentValue = viewModel.selectedUtility,
+                            options = utilityOptions,
+                            icon = Icons.Default.Settings
+                        ) { viewModel.selectPart(SlotType.Utility, it) }
+                    }
+                }
+                "anim" -> {
+                    val animationOptions = listOf("Idle Float", "Weapon Test", "Walk Cycle", "Radar Scan", "Disco Party")
+
+                    item {
+                        CycleSettingRow(
+                            label = "ACTIVE ANIMATION",
+                            currentValue = viewModel.activeAnimation,
+                            options = animationOptions,
+                            icon = Icons.Default.AutoAwesome
+                        ) { viewModel.activeAnimation = it }
+                    }
+                    item {
+                        Card(
+                            onClick = { viewModel.isAnimating = !viewModel.isAnimating },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(72.dp),
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFF13182C)),
+                            border = BorderStroke(1.dp, CyberIron),
+                            shape = RoundedCornerShape(10.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(16.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                        .background(Color(0xFF1D2440)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        imageVector = if (viewModel.isAnimating) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                        contentDescription = "Play/Pause",
+                                        tint = CyberBlue,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                }
+
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.Center
+                                ) {
+                                    Text(
+                                        text = "ANIMATION STATE",
+                                        color = CyberGray,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                    Text(
+                                        text = if (viewModel.isAnimating) "PLAYING" else "PAUSED",
+                                        color = CyberWhite,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Black,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFF1D2440))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = if (viewModel.isAnimating) "PAUSE" else "PLAY",
+                                        color = CyberBlue,
+                                        fontSize = 9.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+fun CycleSettingRow(
+    label: String,
+    currentValue: String,
+    options: List<String>,
+    icon: ImageVector,
+    onValueChange: (String) -> Unit
+) {
+    Card(
+        onClick = {
+            val currentIndex = options.indexOf(currentValue)
+            val nextIndex = if (currentIndex < 0) 0 else (currentIndex + 1) % options.size
+            onValueChange(options[nextIndex])
+        },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(72.dp),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF13182C)),
+        border = BorderStroke(1.dp, CyberIron),
+        shape = RoundedCornerShape(10.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0xFF1D2440)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = label,
+                    tint = CyberBlue,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = label,
+                    color = CyberGray,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
+                Text(
+                    text = currentValue.uppercase(),
+                    color = CyberWhite,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Black,
+                    fontFamily = FontFamily.Monospace
+                )
+            }
+
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(Color(0xFF1D2440))
+                    .padding(horizontal = 10.dp, vertical = 4.dp)
+            ) {
+                Text(
+                    text = "CYCLE",
+                    color = CyberBlue,
+                    fontSize = 9.sp,
+                    fontWeight = FontWeight.Bold,
+                    fontFamily = FontFamily.Monospace
+                )
             }
         }
     }
@@ -2100,7 +2671,9 @@ fun DrawScope.drawRobotChassis(
     rotX: Float = -0.15f,
     rotY: Float = 0.4f,
     rotZ: Float = 0f,
-    cameraShake: Float = 0f
+    cameraShake: Float = 0f,
+    headStyle: String = "Standard Dome",
+    torsoStyle: String = "Fusion Frame"
 ) {
     val canvasWidth = size.width
     val canvasHeight = size.height
@@ -2182,7 +2755,7 @@ fun DrawScope.drawRobotChassis(
 
     // --- PAINTER'S ALGORITHM ORDERED 3D COMPONENT LIST ---
 
-    // 1. BACKPACK/UTILITY MODULE
+    // 1. BACKPACK/UTILITY MODULE (Highly detailed sub-components)
     if (utility != "Empty") {
         val backpackColor = when (utility) {
             "Cooling System" -> CyberBlue
@@ -2190,6 +2763,8 @@ fun DrawScope.drawRobotChassis(
             "Object Detector", "Heat Sensor" -> CyberOrange
             else -> Color.Gray
         }
+        
+        // Base main backpack bracket
         draw3DCuboid(
             rx = rx, ry = ry,
             cx = 0f, cy = -5f, cz = -19f,
@@ -2197,9 +2772,112 @@ fun DrawScope.drawRobotChassis(
             rotX = rotX, rotY = rotY, rotZ = rotZ,
             baseColor = backpackColor
         )
+
+        // Sub-component visual details inside the utility modules
+        when (utility) {
+            "Cooling System" -> {
+                // Circular cooling radiator fans (rotating)
+                val fanAngle = progress * 15f
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 0f, cy = -12f, cz = -26.1f,
+                    sizeX = 8f, sizeY = 8f, sizeZ = 1f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ + fanAngle,
+                    baseColor = Color.DarkGray,
+                    outlineColor = CyberBlue
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 0f, cy = 2f, cz = -26.1f,
+                    sizeX = 8f, sizeY = 8f, sizeZ = 1f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ - fanAngle * 1.3f,
+                    baseColor = Color.DarkGray,
+                    outlineColor = CyberBlue
+                )
+                // Dual coolant conduits running from back to chest side
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -10f, cy = -5f, cz = -14f,
+                    sizeX = 4f, sizeY = 16f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ,
+                    baseColor = CyberBlue.copy(alpha = 0.8f),
+                    outlineColor = Color.White
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 10f, cy = -5f, cz = -14f,
+                    sizeX = 4f, sizeY = 16f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ,
+                    baseColor = CyberBlue.copy(alpha = 0.8f),
+                    outlineColor = Color.White
+                )
+            }
+            "Turbo Battery" -> {
+                // 3 visible high-density cells side-by-side inside translucent casing
+                for (cellX in listOf(-4f, 0f, 4f)) {
+                    draw3DCuboid(
+                        rx = rx, ry = ry,
+                        cx = cellX, cy = -5f, cz = -26.1f,
+                        sizeX = 3f, sizeY = 20f, sizeZ = 3f,
+                        rotX = rotX, rotY = rotY, rotZ = rotZ,
+                        baseColor = CyberLime,
+                        outlineColor = Color.White
+                    )
+                }
+            }
+            "Battery Pack" -> {
+                // Dual copper electrodes and red power indicator cap
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -4f, cy = -16f, cz = -22f,
+                    sizeX = 3f, sizeY = 4f, sizeZ = 3f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ,
+                    baseColor = CyberGold,
+                    outlineColor = Color.White
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 4f, cy = -16f, cz = -22f,
+                    sizeX = 3f, sizeY = 4f, sizeZ = 3f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ,
+                    baseColor = CyberGold,
+                    outlineColor = Color.White
+                )
+                // Pulsing indicator light
+                val batteryIndicatorColor = if (progress % 0.4f > 0.2f) CyberOrange else CyberRed
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 0f, cy = 6f, cz = -26.1f,
+                    sizeX = 4f, sizeY = 4f, sizeZ = 1f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ,
+                    baseColor = batteryIndicatorColor
+                )
+            }
+            "Object Detector", "Heat Sensor" -> {
+                // Rotating sonar scanner dish/radar assembly on top of the module
+                val radarSpin = progress * 8f
+                // Pivot bar
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 0f, cy = -22f, cz = -19f,
+                    sizeX = 4f, sizeY = 6f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ,
+                    baseColor = CyberSteel
+                )
+                // Scanning panel dish
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 0f, cy = -26f, cz = -19f,
+                    sizeX = 16f, sizeY = 2f, sizeZ = 10f,
+                    rotX = rotX + 0.2f, rotY = rotY + radarSpin, rotZ = rotZ,
+                    baseColor = CyberOrange,
+                    outlineColor = Color.White
+                )
+            }
+        }
     }
 
-    // 2. BACK CANISTERS (JETPACK ONLY)
+    // 2. BACK CANISTERS (JETPACK ONLY) (Enhanced visuals)
     if (legs == "Jetpack") {
         val canisterColor = if (isFailed) CyberGray else CyberSteel
         // Left canister
@@ -2210,6 +2888,15 @@ fun DrawScope.drawRobotChassis(
             rotX = rotX, rotY = rotY, rotZ = rotZ,
             baseColor = canisterColor
         )
+        // Left chrome strap
+        draw3DCuboid(
+            rx = rx, ry = ry,
+            cx = -12f, cy = -4f, cz = -11.9f,
+            sizeX = 8.2f, sizeY = 3f, sizeZ = 1f,
+            rotX = rotX, rotY = rotY, rotZ = rotZ,
+            baseColor = Color.White,
+            outlineColor = Color.Black
+        )
         // Right canister
         draw3DCuboid(
             rx = rx, ry = ry,
@@ -2217,6 +2904,15 @@ fun DrawScope.drawRobotChassis(
             sizeX = 8f, sizeY = 24f, sizeZ = 8f,
             rotX = rotX, rotY = rotY, rotZ = rotZ,
             baseColor = canisterColor
+        )
+        // Right chrome strap
+        draw3DCuboid(
+            rx = rx, ry = ry,
+            cx = 12f, cy = -4f, cz = -11.9f,
+            sizeX = 8.2f, sizeY = 3f, sizeZ = 1f,
+            rotX = rotX, rotY = rotY, rotZ = rotZ,
+            baseColor = Color.White,
+            outlineColor = Color.Black
         )
         // Fire thruster cones
         if (!isFailed && progress > 0.05f) {
@@ -2240,297 +2936,717 @@ fun DrawScope.drawRobotChassis(
         }
     }
 
-    // 3. LEFT TOOL ARM
+    // 3. SHOULDER PIVOT PLATES (Heavy Joint Integration)
+    val armColor = if (isFailed) CyberGray else CyberIron
+    draw3DCuboid(
+        rx = rx, ry = ry,
+        cx = -18f, cy = -5f, cz = 0f,
+        sizeX = 4f, sizeY = 10f, sizeZ = 10f,
+        rotX = rotX, rotY = rotY, rotZ = rotZ,
+        baseColor = CyberSteel,
+        outlineColor = Color.Black
+    )
+    draw3DCuboid(
+        rx = rx, ry = ry,
+        cx = 18f, cy = -5f, cz = 0f,
+        sizeX = 4f, sizeY = 10f, sizeZ = 10f,
+        rotX = rotX, rotY = rotY, rotZ = rotZ,
+        baseColor = CyberSteel,
+        outlineColor = Color.Black
+    )
+
+    // 4. LEFT TOOL ARM (Articulated forearm + customized components)
     if (leftArm != "Empty") {
-        val armColor = if (isFailed) CyberGray else CyberIron
         val swingFactor = if (progress >= 0.42f) sin(progress * 38f) * 0.4f else 0f
         
+        // Upper arm segment
         draw3DCuboid(
             rx = rx, ry = ry,
-            cx = -20f, cy = -5f, cz = 0f,
+            cx = -21f, cy = -5f, cz = 0f,
             sizeX = 6f, sizeY = 8f, sizeZ = 8f,
             rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
             baseColor = armColor
         )
+        // Silver forearm cylinder (Hydraulic feel)
         draw3DCuboid(
             rx = rx, ry = ry,
             cx = -28f, cy = 0f, cz = 4f,
             sizeX = 14f, sizeY = 6f, sizeZ = 6f,
             rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-            baseColor = armColor
+            baseColor = CyberSteel,
+            outlineColor = Color.White
         )
+        // Active component tooling visualisations
         when (leftArm) {
             "Hammer" -> {
+                // Mallet hammer block with Caution design
                 draw3DCuboid(
                     rx = rx, ry = ry,
                     cx = -38f, cy = 0f, cz = 6f,
-                    sizeX = 10f, sizeY = 20f, sizeZ = 10f,
+                    sizeX = 12f, sizeY = 22f, sizeZ = 12f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-                    baseColor = Color.Gray
+                    baseColor = Color(0xFF4B5563),
+                    outlineColor = CyberGold
+                )
+                // Piston rod
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -32f, cy = 0f, cz = 6f,
+                    sizeX = 4f, sizeY = 14f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = Color.White
+                )
+                // Yellow safety guard
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -38f, cy = 0f, cz = 12.2f,
+                    sizeX = 8f, sizeY = 16f, sizeZ = 1f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberGold,
+                    outlineColor = Color.Black
                 )
             }
             "Drill" -> {
-                val drillAngle = if (!isFailed) progress * 120f else 0f
+                val drillAngle = if (!isFailed) progress * 140f else 0f
+                // Three-tier rotating drilling bit cone
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = -38f, cy = 0f, cz = 6f,
-                    sizeX = 12f, sizeY = 10f, sizeZ = 12f,
-                    rotX = rotX + drillAngle, rotY = rotY + swingFactor, rotZ = rotZ,
+                    cx = -34f, cy = 0f, cz = 6f,
+                    sizeX = 14f, sizeY = 14f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ + drillAngle,
                     baseColor = CyberSteel,
+                    outlineColor = Color.White
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -40f, cy = 0f, cz = 6f,
+                    sizeX = 10f, sizeY = 10f, sizeZ = 8f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ - drillAngle * 1.5f,
+                    baseColor = Color.Gray,
+                    outlineColor = CyberBlue
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -45f, cy = 0f, cz = 6f,
+                    sizeX = 6f, sizeY = 6f, sizeZ = 6f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ + drillAngle * 2f,
+                    baseColor = CyberWhite,
                     outlineColor = CyberBlue
                 )
             }
             "Shield Arm" -> {
+                // Hexagonal protective crystal emitter
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = -36f, cy = 0f, cz = 6f,
-                    sizeX = 4f, sizeY = 24f, sizeZ = 24f,
+                    cx = -32f, cy = 0f, cz = 6f,
+                    sizeX = 8f, sizeY = 12f, sizeZ = 12f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-                    baseColor = CyberBlue.copy(alpha = 0.8f),
+                    baseColor = CyberIron,
+                    outlineColor = CyberBlue
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -38f, cy = 0f, cz = 6f,
+                    sizeX = 3f, sizeY = 32f, sizeZ = 32f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberBlue.copy(alpha = 0.6f),
                     outlineColor = Color.White
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -38.2f, cy = 0f, cz = 6f,
+                    sizeX = 1f, sizeY = 16f, sizeZ = 16f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = Color.White.copy(alpha = 0.8f)
                 )
             }
             "Welding Torch" -> {
+                // Detailed high-temp brass gas nozzle
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = -36f, cy = 0f, cz = 6f,
-                    sizeX = 10f, sizeY = 4f, sizeZ = 4f,
+                    cx = -34f, cy = 0f, cz = 6f,
+                    sizeX = 12f, sizeY = 6f, sizeZ = 6f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-                    baseColor = Color.DarkGray
+                    baseColor = Color.DarkGray,
+                    outlineColor = CyberOrange
                 )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -42f, cy = 0f, cz = 6f,
+                    sizeX = 8f, sizeY = 4f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberGold,
+                    outlineColor = Color.White
+                )
+                // Jet spark flame and glowing white plasma core
                 if (!isFailed && progress >= 0.42f) {
+                    val pulseFlame = 6f + abs(sin(progress * 45f)) * 8f
                     draw3DCuboid(
                         rx = rx, ry = ry,
-                        cx = -43f, cy = 0f, cz = 6f,
-                        sizeX = 6f, sizeY = 6f, sizeZ = 6f,
+                        cx = -48f, cy = 0f, cz = 6f,
+                        sizeX = pulseFlame, sizeY = 4f, sizeZ = 4f,
                         rotX = rotX, rotY = rotY, rotZ = rotZ,
                         baseColor = CyberBlue,
-                        outlineColor = CyberWhite
+                        outlineColor = Color.White
                     )
+                    // Golden sparks emitting from welding tip
+                    val torchTipPt = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(-48f, 0f, 6f), rotX), rotY), 350f, rx, ry)
+                    drawCircle(Color.White, 3f, torchTipPt)
+                    for (s in 1..4) {
+                        val sx = torchTipPt.x - (s * 4f + abs(sin(progress * 90f * s)) * 12f)
+                        val sy = torchTipPt.y + (sin(progress * 40f * s) * 10f)
+                        drawCircle(CyberGold, 1.8f, Offset(sx, sy))
+                    }
                 }
             }
             "Grabber" -> {
+                // Jointed base block
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = -36f, cy = -6f, cz = 6f,
-                    sizeX = 8f, sizeY = 3f, sizeZ = 3f,
+                    cx = -32f, cy = 0f, cz = 6f,
+                    sizeX = 6f, sizeY = 10f, sizeZ = 10f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-                    baseColor = armColor
+                    baseColor = CyberIron
                 )
+                // Double articulated claws that open/close dynamically
+                val pinch = if (!isFailed) abs(sin(progress * 15f)) * 8f else 4f
+                // Upper finger
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = -36f, cy = 6f, cz = 6f,
-                    sizeX = 8f, sizeY = 3f, sizeZ = 3f,
+                    cx = -38f, cy = -6f + pinch, cz = 6f,
+                    sizeX = 10f, sizeY = 3f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ + 0.2f,
+                    baseColor = armColor,
+                    outlineColor = Color.White
+                )
+                // Lower finger
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -38f, cy = 6f - pinch, cz = 6f,
+                    sizeX = 10f, sizeY = 3f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ - 0.2f,
+                    baseColor = armColor,
+                    outlineColor = Color.White
+                )
+                // Central laser rangefinder lens
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -35f, cy = 0f, cz = 6f,
+                    sizeX = 2f, sizeY = 2f, sizeZ = 2f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-                    baseColor = armColor
+                    baseColor = CyberRed
                 )
             }
             "Magnet" -> {
+                // Copper coil wraps + horseshoe poles
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = -36f, cy = 0f, cz = 6f,
-                    sizeX = 10f, sizeY = 10f, sizeZ = 4f,
+                    cx = -32f, cy = 0f, cz = 6f,
+                    sizeX = 8f, sizeY = 12f, sizeZ = 12f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberSteel,
+                    outlineColor = Color.Black
+                )
+                // Horseshoe red north pole
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -38f, cy = -5f, cz = 6f,
+                    sizeX = 10f, sizeY = 5f, sizeZ = 4f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
                     baseColor = CyberRed,
-                    outlineColor = CyberWhite
+                    outlineColor = Color.White
+                )
+                // Horseshoe silver south pole
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -38f, cy = 5f, cz = 6f,
+                    sizeX = 10f, sizeY = 5f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberSteel,
+                    outlineColor = Color.White
+                )
+                // Copper coil winding detailing
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -32f, cy = 0f, cz = 6f,
+                    sizeX = 4f, sizeY = 10f, sizeZ = 10f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberOrange
                 )
             }
         }
     }
 
-    // 4. RIGHT TOOL ARM
+    // 5. RIGHT TOOL ARM (Articulated forearm + customized components)
     if (rightArm != "Empty") {
-        val armColor = if (isFailed) CyberGray else CyberIron
         val swingFactor = if (progress >= 0.42f) -sin(progress * 38f) * 0.4f else 0f
 
+        // Upper arm segment
         draw3DCuboid(
             rx = rx, ry = ry,
-            cx = 20f, cy = -5f, cz = 0f,
+            cx = 21f, cy = -5f, cz = 0f,
             sizeX = 6f, sizeY = 8f, sizeZ = 8f,
             rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
             baseColor = armColor
         )
+        // Silver forearm cylinder (Hydraulic feel)
         draw3DCuboid(
             rx = rx, ry = ry,
             cx = 28f, cy = 0f, cz = 4f,
             sizeX = 14f, sizeY = 6f, sizeZ = 6f,
             rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-            baseColor = armColor
+            baseColor = CyberSteel,
+            outlineColor = Color.White
         )
+        // Active component tooling visualisations
         when (rightArm) {
             "Hammer" -> {
+                // Mallet hammer block with Caution design
                 draw3DCuboid(
                     rx = rx, ry = ry,
                     cx = 38f, cy = 0f, cz = 6f,
-                    sizeX = 10f, sizeY = 20f, sizeZ = 10f,
+                    sizeX = 12f, sizeY = 22f, sizeZ = 12f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-                    baseColor = Color.Gray
+                    baseColor = Color(0xFF4B5563),
+                    outlineColor = CyberGold
+                )
+                // Piston rod
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 32f, cy = 0f, cz = 6f,
+                    sizeX = 4f, sizeY = 14f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = Color.White
+                )
+                // Yellow safety guard
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 38f, cy = 0f, cz = 12.2f,
+                    sizeX = 8f, sizeY = 16f, sizeZ = 1f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberGold,
+                    outlineColor = Color.Black
                 )
             }
             "Drill" -> {
-                val drillAngle = if (!isFailed) progress * 120f else 0f
+                val drillAngle = if (!isFailed) progress * 140f else 0f
+                // Three-tier rotating drilling bit cone
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = 38f, cy = 0f, cz = 6f,
-                    sizeX = 12f, sizeY = 10f, sizeZ = 12f,
-                    rotX = rotX + drillAngle, rotY = rotY + swingFactor, rotZ = rotZ,
+                    cx = 34f, cy = 0f, cz = 6f,
+                    sizeX = 14f, sizeY = 14f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ + drillAngle,
                     baseColor = CyberSteel,
+                    outlineColor = Color.White
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 40f, cy = 0f, cz = 6f,
+                    sizeX = 10f, sizeY = 10f, sizeZ = 8f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ - drillAngle * 1.5f,
+                    baseColor = Color.Gray,
+                    outlineColor = CyberBlue
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 45f, cy = 0f, cz = 6f,
+                    sizeX = 6f, sizeY = 6f, sizeZ = 6f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ + drillAngle * 2f,
+                    baseColor = CyberWhite,
                     outlineColor = CyberBlue
                 )
             }
             "Shield Arm" -> {
+                // Hexagonal protective crystal emitter
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = 36f, cy = 0f, cz = 6f,
-                    sizeX = 4f, sizeY = 24f, sizeZ = 24f,
+                    cx = 32f, cy = 0f, cz = 6f,
+                    sizeX = 8f, sizeY = 12f, sizeZ = 12f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-                    baseColor = CyberBlue.copy(alpha = 0.8f),
+                    baseColor = CyberIron,
+                    outlineColor = CyberBlue
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 38f, cy = 0f, cz = 6f,
+                    sizeX = 3f, sizeY = 32f, sizeZ = 32f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberBlue.copy(alpha = 0.6f),
                     outlineColor = Color.White
+                )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 38.2f, cy = 0f, cz = 6f,
+                    sizeX = 1f, sizeY = 16f, sizeZ = 16f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = Color.White.copy(alpha = 0.8f)
                 )
             }
             "Welding Torch" -> {
+                // Detailed high-temp brass gas nozzle
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = 36f, cy = 0f, cz = 6f,
-                    sizeX = 10f, sizeY = 4f, sizeZ = 4f,
+                    cx = 34f, cy = 0f, cz = 6f,
+                    sizeX = 12f, sizeY = 6f, sizeZ = 6f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-                    baseColor = Color.DarkGray
+                    baseColor = Color.DarkGray,
+                    outlineColor = CyberOrange
                 )
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 42f, cy = 0f, cz = 6f,
+                    sizeX = 8f, sizeY = 4f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberGold,
+                    outlineColor = Color.White
+                )
+                // Jet spark flame and glowing white plasma core
                 if (!isFailed && progress >= 0.42f) {
+                    val pulseFlame = 6f + abs(sin(progress * 45f)) * 8f
                     draw3DCuboid(
                         rx = rx, ry = ry,
-                        cx = 43f, cy = 0f, cz = 6f,
-                        sizeX = 6f, sizeY = 6f, sizeZ = 6f,
+                        cx = 48f, cy = 0f, cz = 6f,
+                        sizeX = pulseFlame, sizeY = 4f, sizeZ = 4f,
                         rotX = rotX, rotY = rotY, rotZ = rotZ,
                         baseColor = CyberBlue,
-                        outlineColor = CyberWhite
+                        outlineColor = Color.White
                     )
+                    // Golden sparks emitting from welding tip
+                    val torchTipPt = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(48f, 0f, 6f), rotX), rotY), 350f, rx, ry)
+                    drawCircle(Color.White, 3f, torchTipPt)
+                    for (s in 1..4) {
+                        val sx = torchTipPt.x + (s * 4f + abs(sin(progress * 90f * s)) * 12f)
+                        val sy = torchTipPt.y + (sin(progress * 40f * s) * 10f)
+                        drawCircle(CyberGold, 1.8f, Offset(sx, sy))
+                    }
                 }
             }
             "Grabber" -> {
+                // Jointed base block
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = 36f, cy = -6f, cz = 6f,
-                    sizeX = 8f, sizeY = 3f, sizeZ = 3f,
+                    cx = 32f, cy = 0f, cz = 6f,
+                    sizeX = 6f, sizeY = 10f, sizeZ = 10f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-                    baseColor = armColor
+                    baseColor = CyberIron
                 )
+                // Double articulated claws that open/close dynamically
+                val pinch = if (!isFailed) abs(sin(progress * 15f)) * 8f else 4f
+                // Upper finger
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = 36f, cy = 6f, cz = 6f,
-                    sizeX = 8f, sizeY = 3f, sizeZ = 3f,
+                    cx = 38f, cy = -6f + pinch, cz = 6f,
+                    sizeX = 10f, sizeY = 3f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ + 0.2f,
+                    baseColor = armColor,
+                    outlineColor = Color.White
+                )
+                // Lower finger
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 38f, cy = 6f - pinch, cz = 6f,
+                    sizeX = 10f, sizeY = 3f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ - 0.2f,
+                    baseColor = armColor,
+                    outlineColor = Color.White
+                )
+                // Central laser rangefinder lens
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 35f, cy = 0f, cz = 6f,
+                    sizeX = 2f, sizeY = 2f, sizeZ = 2f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
-                    baseColor = armColor
+                    baseColor = CyberRed
                 )
             }
             "Magnet" -> {
+                // Copper coil wraps + horseshoe poles
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = 36f, cy = 0f, cz = 6f,
-                    sizeX = 10f, sizeY = 10f, sizeZ = 4f,
+                    cx = 32f, cy = 0f, cz = 6f,
+                    sizeX = 8f, sizeY = 12f, sizeZ = 12f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberSteel,
+                    outlineColor = Color.Black
+                )
+                // Horseshoe red north pole
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 38f, cy = -5f, cz = 6f,
+                    sizeX = 10f, sizeY = 5f, sizeZ = 4f,
                     rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
                     baseColor = CyberRed,
-                    outlineColor = CyberWhite
+                    outlineColor = Color.White
+                )
+                // Horseshoe silver south pole
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 38f, cy = 5f, cz = 6f,
+                    sizeX = 10f, sizeY = 5f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberSteel,
+                    outlineColor = Color.White
+                )
+                // Copper coil winding detailing
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 32f, cy = 0f, cz = 6f,
+                    sizeX = 4f, sizeY = 10f, sizeZ = 10f,
+                    rotX = rotX, rotY = rotY + swingFactor, rotZ = rotZ,
+                    baseColor = CyberOrange
                 )
             }
         }
     }
 
-    // 5. MOBILITY LEGS SYSTEM
+    // 6. ADVANCED MOBILITY LEGS SYSTEM
     val mobilityColor = if (isFailed) CyberGray else CyberIron
     val wheelSpin = if (!isFailed) progress * 15f else 0f
 
     when (legs) {
         "Wheels" -> {
+            // Detailed wheel rubber tread outer block
             draw3DCuboid(
                 rx = rx, ry = ry,
                 cx = -18f, cy = 20f, cz = 0f,
-                sizeX = 8f, sizeY = 18f, sizeZ = 18f,
+                sizeX = 8f, sizeY = 22f, sizeZ = 22f,
                 rotX = rotX + wheelSpin, rotY = rotY, rotZ = rotZ,
-                baseColor = mobilityColor,
-                outlineColor = CyberWhite
+                baseColor = Color(0xFF1E293B),
+                outlineColor = Color.Black
             )
+            // Left alloy wheel hub insert with spokes
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = -19f, cy = 20f, cz = 0f,
+                sizeX = 4f, sizeY = 12f, sizeZ = 12f,
+                rotX = rotX + wheelSpin * 2.5f, rotY = rotY, rotZ = rotZ,
+                baseColor = CyberSteel,
+                outlineColor = Color.White
+            )
+            // Right detailed wheel block
             draw3DCuboid(
                 rx = rx, ry = ry,
                 cx = 18f, cy = 20f, cz = 0f,
-                sizeX = 8f, sizeY = 18f, sizeZ = 18f,
+                sizeX = 8f, sizeY = 22f, sizeZ = 22f,
                 rotX = rotX + wheelSpin, rotY = rotY, rotZ = rotZ,
-                baseColor = mobilityColor,
-                outlineColor = CyberWhite
+                baseColor = Color(0xFF1E293B),
+                outlineColor = Color.Black
             )
+            // Right alloy wheel hub insert with spokes
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 19f, cy = 20f, cz = 0f,
+                sizeX = 4f, sizeY = 12f, sizeZ = 12f,
+                rotX = rotX + wheelSpin * 2.5f, rotY = rotY, rotZ = rotZ,
+                baseColor = CyberSteel,
+                outlineColor = Color.White
+            )
+            // Horizontal axle rod
             drawLine(mobilityColor, Offset(rx - 14f, ry + 20f), Offset(rx + 14f, ry + 20f), strokeWidth = 3f)
+            
+            // Suspension spring coils (red visual accent)
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = -14f, cy = 11f, cz = 0f,
+                sizeX = 4f, sizeY = 12f, sizeZ = 4f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = CyberRed,
+                outlineColor = Color.White
+            )
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 14f, cy = 11f, cz = 0f,
+                sizeX = 4f, sizeY = 12f, sizeZ = 4f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = CyberRed,
+                outlineColor = Color.White
+            )
         }
         "Tank Tracks" -> {
+            // Main caterpillar outer track block
             draw3DCuboid(
                 rx = rx, ry = ry,
                 cx = -18f, cy = 18f, cz = 0f,
-                sizeX = 10f, sizeY = 14f, sizeZ = 30f,
+                sizeX = 10f, sizeY = 16f, sizeZ = 34f,
                 rotX = rotX, rotY = rotY, rotZ = rotZ,
-                baseColor = Color(0xFF374151),
+                baseColor = Color(0xFF1F2937),
                 outlineColor = Color.Black
             )
             draw3DCuboid(
                 rx = rx, ry = ry,
                 cx = 18f, cy = 18f, cz = 0f,
-                sizeX = 10f, sizeY = 14f, sizeZ = 30f,
+                sizeX = 10f, sizeY = 16f, sizeZ = 34f,
                 rotX = rotX, rotY = rotY, rotZ = rotZ,
-                baseColor = Color(0xFF374151),
+                baseColor = Color(0xFF1F2937),
                 outlineColor = Color.Black
             )
-        }
-        "Spider Legs" -> {
-            for (step in listOf(-1, 0, 1)) {
-                val stepOffset = step * 12f
-                val activeLobe = if (!isFailed) sin(progress * 25f + step * 3f) * 6f else 0f
+            // Three rotating inner road wheel sprocket rollers
+            for (j in listOf(-12f, 0f, 12f)) {
+                val spinAngle = if (!isFailed) wheelSpin * 1.5f else 0f
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = -20f, cy = 14f + activeLobe, cz = stepOffset,
-                    sizeX = 8f, sizeY = 12f, sizeZ = 4f,
-                    rotX = rotX, rotY = rotY, rotZ = rotZ - 0.2f,
-                    baseColor = mobilityColor
+                    cx = -18.5f, cy = 20f, cz = j,
+                    sizeX = 4f, sizeY = 8f, sizeZ = 8f,
+                    rotX = rotX + spinAngle, rotY = rotY, rotZ = rotZ,
+                    baseColor = CyberSteel,
+                    outlineColor = Color.Black
                 )
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = 20f, cy = 14f - activeLobe, cz = stepOffset,
-                    sizeX = 8f, sizeY = 12f, sizeZ = 4f,
-                    rotX = rotX, rotY = rotY, rotZ = rotZ + 0.2f,
-                    baseColor = mobilityColor
+                    cx = 18.5f, cy = 20f, cz = j,
+                    sizeX = 4f, sizeY = 8f, sizeZ = 8f,
+                    rotX = rotX + spinAngle, rotY = rotY, rotZ = rotZ,
+                    baseColor = CyberSteel,
+                    outlineColor = Color.Black
+                )
+            }
+        }
+        "Spider Legs" -> {
+            // Multi-segment spider crawling limbs with pivot joint bolts
+            for (step in listOf(-1, 0, 1)) {
+                val stepOffset = step * 12f
+                val activeLobe = if (!isFailed) sin(progress * 25f + step * 3.5f) * 8f else 0f
+                
+                // --- LEFT SIDE Crawlers ---
+                // Thigh joint segment
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -18f, cy = 8f + activeLobe * 0.3f, cz = stepOffset,
+                    sizeX = 8f, sizeY = 4f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ - 0.4f,
+                    baseColor = CyberIron,
+                    outlineColor = Color.Black
+                )
+                // Knee joint cap (gold)
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -24f, cy = 11f + activeLobe * 0.6f, cz = stepOffset,
+                    sizeX = 5f, sizeY = 5f, sizeZ = 5f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ,
+                    baseColor = CyberGold,
+                    outlineColor = Color.White
+                )
+                // Shin segment
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = -26f, cy = 18f + activeLobe, cz = stepOffset,
+                    sizeX = 4f, sizeY = 12f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ + 0.3f,
+                    baseColor = mobilityColor,
+                    outlineColor = Color.White
+                )
+                
+                // --- RIGHT SIDE Crawlers ---
+                // Thigh joint segment
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 18f, cy = 8f - activeLobe * 0.3f, cz = stepOffset,
+                    sizeX = 8f, sizeY = 4f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ + 0.4f,
+                    baseColor = CyberIron,
+                    outlineColor = Color.Black
+                )
+                // Knee joint cap
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 24f, cy = 11f - activeLobe * 0.6f, cz = stepOffset,
+                    sizeX = 5f, sizeY = 5f, sizeZ = 5f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ,
+                    baseColor = CyberGold,
+                    outlineColor = Color.White
+                )
+                // Shin segment
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 26f, cy = 18f - activeLobe, cz = stepOffset,
+                    sizeX = 4f, sizeY = 12f, sizeZ = 4f,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ - 0.3f,
+                    baseColor = mobilityColor,
+                    outlineColor = Color.White
                 )
             }
         }
         "Hover Engine" -> {
+            // Curved thrust nozzle bracket
             draw3DCuboid(
                 rx = rx, ry = ry,
-                cx = 0f, cy = 18f, cz = 0f,
-                sizeX = 16f, sizeY = 12f, sizeZ = 16f,
+                cx = 0f, cy = 14f, cz = 0f,
+                sizeX = 20f, sizeY = 10f, sizeZ = 20f,
                 rotX = rotX, rotY = rotY, rotZ = rotZ,
                 baseColor = mobilityColor,
                 outlineColor = CyberBlue
             )
+            // Metallic exhaust nozzle
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 0f, cy = 20f, cz = 0f,
+                sizeX = 14f, sizeY = 4f, sizeZ = 14f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color.DarkGray,
+                outlineColor = Color.White
+            )
+            // Floating plasma jet flame & concentric vector ripples
             if (!isFailed) {
                 val plasmaSize = 10f + abs(sin(progress * 50f)) * 8f
                 draw3DCuboid(
                     rx = rx, ry = ry,
-                    cx = 0f, cy = 25f, cz = 0f,
+                    cx = 0f, cy = 26f, cz = 0f,
                     sizeX = plasmaSize, sizeY = plasmaSize, sizeZ = plasmaSize,
                     rotX = rotX, rotY = rotY, rotZ = rotZ,
-                    baseColor = CyberBlue.copy(alpha = 0.8f),
-                    outlineColor = CyberWhite
+                    baseColor = CyberBlue.copy(alpha = 0.7f),
+                    outlineColor = Color.White
                 )
+                
+                // Hover anti-grav floor ripples
+                val nozzleCenterPt = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(0f, 24f, 0f), rotX), rotY), 350f, rx, ry)
+                for (r in 1..2) {
+                    val activeRadius = 14f * r + (progress * 60f) % 24f
+                    drawCircle(
+                        color = CyberBlue.copy(alpha = (1f - (activeRadius / 48f)).coerceIn(0f, 1f)),
+                        radius = activeRadius,
+                        center = nozzleCenterPt,
+                        style = Stroke(width = 1.5f)
+                    )
+                }
             }
         }
         "Jump Springs" -> {
-            val compress = if (!isFailed) 14f + sin(progress * 15f) * 6f else 18f
+            // Helical steel spring layout with dampener plates
             draw3DCuboid(
                 rx = rx, ry = ry,
-                cx = 0f, cy = 18f, cz = 0f,
-                sizeX = 12f, sizeY = compress, sizeZ = 12f,
+                cx = 0f, cy = 11f, cz = 0f,
+                sizeX = 16f, sizeY = 4f, sizeZ = 16f,
                 rotX = rotX, rotY = rotY, rotZ = rotZ,
-                baseColor = mobilityColor,
-                outlineColor = CyberOrange
+                baseColor = CyberSteel,
+                outlineColor = Color.Black
+            )
+            val compress = if (!isFailed) 14f + sin(progress * 15f) * 6f else 18f
+            val coilSegmentsCount = 4
+            for (c in 0 until coilSegmentsCount) {
+                val segmentHeight = compress / coilSegmentsCount
+                val segmentY = 13f + c * segmentHeight
+                val sizeOffset = if (c % 2 == 0) 14f else 11f
+                draw3DCuboid(
+                    rx = rx, ry = ry,
+                    cx = 0f, cy = segmentY, cz = 0f,
+                    sizeX = sizeOffset, sizeY = 3f, sizeZ = sizeOffset,
+                    rotX = rotX, rotY = rotY, rotZ = rotZ,
+                    baseColor = CyberOrange,
+                    outlineColor = Color.White
+                )
+            }
+            // Spring damper heavy ground pad
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 0f, cy = 13f + compress, cz = 0f,
+                sizeX = 18f, sizeY = 4f, sizeZ = 18f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color.DarkGray,
+                outlineColor = Color.White
             )
         }
         else -> {
+            // Standard static column placeholder
             draw3DCuboid(
                 rx = rx, ry = ry,
                 cx = 0f, cy = 18f, cz = 0f,
@@ -2541,86 +3657,178 @@ fun DrawScope.drawRobotChassis(
         }
     }
 
-    // 6. ROBOT BODY CORE (Solid 3D Cuboid)
-    draw3DCuboid(
-        rx = rx, ry = ry,
-        cx = 0f, cy = -5f, cz = 0f,
-        sizeX = 34f, sizeY = 36f, sizeZ = 34f,
-        rotX = rotX, rotY = rotY, rotZ = rotZ,
-        baseColor = finalBodyColor
-    )
-
-    // 7. CHEST LED PANEL (Extruded monitor)
-    val ledColor = if (isFailed) Color.DarkGray else CyberBlue.copy(alpha = 0.9f)
-    draw3DCuboid(
-        rx = rx, ry = ry,
-        cx = 0f, cy = -4f, cz = 17f,
-        sizeX = 22f, sizeY = 20f, sizeZ = 3f,
-        rotX = rotX, rotY = rotY, rotZ = rotZ,
-        baseColor = ledColor,
-        outlineColor = if (isFailed) Color.Black else Color.White
-    )
-
-    // 8. ROBOT HEAD
-    draw3DCuboid(
-        rx = rx, ry = ry,
-        cx = 0f, cy = -32f, cz = 0f,
-        sizeX = 24f, sizeY = 18f, sizeZ = 24f,
-        rotX = rotX, rotY = rotY, rotZ = rotZ,
-        baseColor = finalBodyColor
-    )
-
-    // 9. CYBERNETIC EYES
-    if (!isFailed) {
-        val eyeColor = when (eyesType) {
-            "laser" -> CyberRed
-            "retro" -> CyberOrange
-            "glass" -> CyberWhite
-            else -> CyberBlue
-        }
+    // 7. ROBOT BODY CORE (Solid 3D Cuboid Hull)
+    if (torsoStyle == "Crewmate Suit") {
+        // Main rounded Crewmate body capsule
         draw3DCuboid(
             rx = rx, ry = ry,
-            cx = -6f, cy = -32f, cz = 12f,
-            sizeX = 4f, sizeY = 4f, sizeZ = 2f,
+            cx = 0f, cy = -5f, cz = 0f,
+            sizeX = 28f, sizeY = 40f, sizeZ = 28f,
             rotX = rotX, rotY = rotY, rotZ = rotZ,
-            baseColor = eyeColor,
-            outlineColor = Color.White
+            baseColor = finalBodyColor,
+            outlineColor = Color.Black
         )
+        // Oxygen backpack canister
         draw3DCuboid(
             rx = rx, ry = ry,
-            cx = 6f, cy = -32f, cz = 12f,
-            sizeX = 4f, sizeY = 4f, sizeZ = 2f,
+            cx = 0f, cy = -5f, cz = -15f,
+            sizeX = 12f, sizeY = 28f, sizeZ = 22f,
             rotX = rotX, rotY = rotY, rotZ = rotZ,
-            baseColor = eyeColor,
-            outlineColor = Color.White
+            baseColor = finalBodyColor,
+            outlineColor = Color.Black
         )
-        if (eyesType == "laser" && state is SimulationState.Running) {
-            val laserStartPt = VectorMath.rotateY(VectorMath.rotateX(Point3D(0f, -32f, 13f), rotX), rotY)
-            val laserEndPt = VectorMath.rotateY(VectorMath.rotateX(Point3D(0f, -32f, 180f), rotX), rotY)
-            
-            val pStart = VectorMath.project(laserStartPt, 350f, rx, ry)
-            val pEnd = VectorMath.project(laserEndPt, 350f, rx, ry)
-            
-            drawLine(
-                color = CyberRed,
-                start = pStart,
-                end = pEnd,
-                strokeWidth = 3f
-            )
-            drawCircle(Color.White, 4f, pStart)
-        }
     } else {
-        val leftEyeC = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(-6f, -32f, 12f), rotX), rotY), 350f, rx, ry)
-        val rightEyeC = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(6f, -32f, 12f), rotX), rotY), 350f, rx, ry)
-        
-        drawLine(CyberRed, Offset(leftEyeC.x - 4f, leftEyeC.y - 4f), Offset(leftEyeC.x + 4f, leftEyeC.y + 4f), strokeWidth = 2.2f)
-        drawLine(CyberRed, Offset(leftEyeC.x + 4f, leftEyeC.y - 4f), Offset(leftEyeC.x - 4f, leftEyeC.y + 4f), strokeWidth = 2.2f)
+        draw3DCuboid(
+            rx = rx, ry = ry,
+            cx = 0f, cy = -5f, cz = 0f,
+            sizeX = 34f, sizeY = 36f, sizeZ = 34f,
+            rotX = rotX, rotY = rotY, rotZ = rotZ,
+            baseColor = finalBodyColor
+        )
 
-        drawLine(CyberRed, Offset(rightEyeC.x - 4f, rightEyeC.y - 4f), Offset(rightEyeC.x + 4f, rightEyeC.y + 4f), strokeWidth = 2.2f)
-        drawLine(CyberRed, Offset(rightEyeC.x + 4f, rightEyeC.y - 4f), Offset(rightEyeC.x - 4f, rightEyeC.y + 4f), strokeWidth = 2.2f)
+        // 8. COGNITIVE ARC ENERGY CORE REACTOR (Glow center on chest)
+        val corePt = VectorMath.rotateY(VectorMath.rotateX(Point3D(0f, -4f, 18.2f), rotX), rotY)
+        val coreScreen = VectorMath.project(corePt, 350f, rx, ry)
+        val corePulse = 7f + abs(sin(progress * 40f)) * 4f
+        drawCircle(
+            color = if (isFailed) Color.DarkGray else CyberBlue,
+            radius = corePulse,
+            center = coreScreen
+        )
+        drawCircle(
+            color = if (isFailed) Color.Gray else Color.White,
+            radius = corePulse / 2f,
+            center = coreScreen
+        )
+
+        // 9. CYBER CIRCUITS PCB INTEGRATION PATHS (Fine copper nodes on chest)
+        if (!isFailed) {
+            val nodeL1 = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(-12f, -18f, 17.5f), rotX), rotY), 350f, rx, ry)
+            val nodeL2 = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(-6f, -12f, 17.5f), rotX), rotY), 350f, rx, ry)
+            val nodeR1 = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(12f, -18f, 17.5f), rotX), rotY), 350f, rx, ry)
+            val nodeR2 = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(6f, -12f, 17.5f), rotX), rotY), 350f, rx, ry)
+            
+            drawLine(CyberLime.copy(alpha = 0.5f), nodeL1, nodeL2, strokeWidth = 1.5f)
+            drawLine(CyberLime.copy(alpha = 0.5f), nodeR1, nodeR2, strokeWidth = 1.5f)
+            drawCircle(CyberLime, 2.5f, nodeL2)
+            drawCircle(CyberLime, 2.5f, nodeR2)
+        }
+
+        // 10. CHEST LED PANEL TELEMETRY / BATTERY READOUT
+        val ledColor = if (isFailed) Color.DarkGray else CyberBlue.copy(alpha = 0.9f)
+        draw3DCuboid(
+            rx = rx, ry = ry,
+            cx = 0f, cy = -4f, cz = 17f,
+            sizeX = 22f, sizeY = 20f, sizeZ = 3f,
+            rotX = rotX, rotY = rotY, rotZ = rotZ,
+            baseColor = ledColor,
+            outlineColor = if (isFailed) Color.Black else Color.White
+        )
+        
+        // Live battery discharge animation bar on the chest screen
+        if (!isFailed) {
+            val batStartPt = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(-8f, 2f, 18.2f), rotX), rotY), 350f, rx, ry)
+            val batEndPt = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(8f, 2f, 18.2f), rotX), rotY), 350f, rx, ry)
+            drawLine(CyberLime.copy(alpha = 0.3f), batStartPt, batEndPt, strokeWidth = 4f)
+            val activeFraction = if (state is SimulationState.Running) (1f - progress).coerceIn(0f, 1f) else 0.8f
+            val activeEnd = Offset(
+                batStartPt.x + (batEndPt.x - batStartPt.x) * activeFraction,
+                batStartPt.y + (batEndPt.y - batStartPt.y) * activeFraction
+            )
+            drawLine(CyberLime, batStartPt, activeEnd, strokeWidth = 4f)
+        }
     }
 
-    // 10. HATS ON HEAD (3D voxel style)
+    // 11. ROBOT HEAD
+    if (headStyle == "Crewmate Visor") {
+        // Main rounded helmet head
+        draw3DCuboid(
+            rx = rx, ry = ry,
+            cx = 0f, cy = -32f, cz = 0f,
+            sizeX = 22f, sizeY = 22f, sizeZ = 22f,
+            rotX = rotX, rotY = rotY, rotZ = rotZ,
+            baseColor = finalBodyColor,
+            outlineColor = Color.Black
+        )
+        // Big glass cyan visor
+        draw3DCuboid(
+            rx = rx, ry = ry,
+            cx = 0f, cy = -32f, cz = 11f,
+            sizeX = 16f, sizeY = 10f, sizeZ = 4f,
+            rotX = rotX, rotY = rotY, rotZ = rotZ,
+            baseColor = Color(0xFF80DEEA), // cyan visor color
+            outlineColor = Color.Black
+        )
+        // Visor glass reflection highlight
+        draw3DCuboid(
+            rx = rx, ry = ry,
+            cx = -4f, cy = -34f, cz = 13.1f,
+            sizeX = 4f, sizeY = 3f, sizeZ = 1f,
+            rotX = rotX, rotY = rotY, rotZ = rotZ,
+            baseColor = Color.White
+        )
+    } else {
+        draw3DCuboid(
+            rx = rx, ry = ry,
+            cx = 0f, cy = -32f, cz = 0f,
+            sizeX = 24f, sizeY = 18f, sizeZ = 24f,
+            rotX = rotX, rotY = rotY, rotZ = rotZ,
+            baseColor = finalBodyColor
+        )
+
+        // 12. CYBERNETIC EYES
+        if (!isFailed) {
+            val eyeColor = when (eyesType) {
+                "laser" -> CyberRed
+                "retro" -> CyberOrange
+                "glass" -> CyberWhite
+                else -> CyberBlue
+            }
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = -6f, cy = -32f, cz = 12f,
+                sizeX = 4f, sizeY = 4f, sizeZ = 2f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = eyeColor,
+                outlineColor = Color.White
+            )
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 6f, cy = -32f, cz = 12f,
+                sizeX = 4f, sizeY = 4f, sizeZ = 2f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = eyeColor,
+                outlineColor = Color.White
+            )
+
+            if (eyesType == "laser" && state is SimulationState.Running) {
+                val laserStartPt = VectorMath.rotateY(VectorMath.rotateX(Point3D(0f, -32f, 13f), rotX), rotY)
+                val laserEndPt = VectorMath.rotateY(VectorMath.rotateX(Point3D(0f, -32f, 180f), rotX), rotY)
+                
+                val pStart = VectorMath.project(laserStartPt, 350f, rx, ry)
+                val pEnd = VectorMath.project(laserEndPt, 350f, rx, ry)
+                
+                drawLine(
+                    color = CyberRed,
+                    start = pStart,
+                    end = pEnd,
+                    strokeWidth = 3f
+                )
+                drawCircle(Color.White, 4f, pStart)
+            }
+        } else {
+            val leftEyeC = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(-6f, -32f, 12f), rotX), rotY), 350f, rx, ry)
+            val rightEyeC = VectorMath.project(VectorMath.rotateY(VectorMath.rotateX(Point3D(6f, -32f, 12f), rotX), rotY), 350f, rx, ry)
+            
+            drawLine(CyberRed, Offset(leftEyeC.x - 4f, leftEyeC.y - 4f), Offset(leftEyeC.x + 4f, leftEyeC.y + 4f), strokeWidth = 2.2f)
+            drawLine(CyberRed, Offset(leftEyeC.x + 4f, leftEyeC.y - 4f), Offset(leftEyeC.x - 4f, leftEyeC.y + 4f), strokeWidth = 2.2f)
+
+            drawLine(CyberRed, Offset(rightEyeC.x - 4f, rightEyeC.y - 4f), Offset(rightEyeC.x + 4f, rightEyeC.y + 4f), strokeWidth = 2.2f)
+            drawLine(CyberRed, Offset(rightEyeC.x + 4f, rightEyeC.y - 4f), Offset(rightEyeC.x - 4f, rightEyeC.y + 4f), strokeWidth = 2.2f)
+        }
+    }
+
+    // 13. HATS ON HEAD (3D voxel style)
     when (hatType) {
         "builder" -> {
             draw3DCuboid(
@@ -2675,9 +3883,122 @@ fun DrawScope.drawRobotChassis(
                 )
             }
         }
+        "sprout" -> {
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 0f, cy = -44f, cz = 0f,
+                sizeX = 2f, sizeY = 8f, sizeZ = 2f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color(0xFF5D4037)
+            )
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = -6f, cy = -47f, cz = 0f,
+                sizeX = 10f, sizeY = 3f, sizeZ = 6f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ + 0.5f,
+                baseColor = Color(0xFF4CAF50),
+                outlineColor = Color.Black
+            )
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 6f, cy = -47f, cz = 0f,
+                sizeX = 10f, sizeY = 3f, sizeZ = 6f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ - 0.5f,
+                baseColor = Color(0xFF4CAF50),
+                outlineColor = Color.Black
+            )
+        }
+        "toilet_paper" -> {
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 0f, cy = -46f, cz = 0f,
+                sizeX = 14f, sizeY = 12f, sizeZ = 14f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color(0xFFEEEEEE),
+                outlineColor = Color.Black
+            )
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 0f, cy = -46f, cz = 0f,
+                sizeX = 4f, sizeY = 12.2f, sizeZ = 4f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color(0xFF8D6E63)
+            )
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 0f, cy = -38f, cz = -8f,
+                sizeX = 12f, sizeY = 8f, sizeZ = 1f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color(0xFFEEEEEE),
+                outlineColor = Color.Black
+            )
+        }
+        "egg" -> {
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 0f, cy = -42f, cz = 0f,
+                sizeX = 26f, sizeY = 2f, sizeZ = 24f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color(0xFFF5F5F5),
+                outlineColor = Color.Black
+            )
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = -2f, cy = -44f, cz = 2f,
+                sizeX = 10f, sizeY = 4f, sizeZ = 10f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color(0xFFFFC107),
+                outlineColor = Color.Black
+            )
+        }
+        "sticky_note" -> {
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 2f, cy = -32f, cz = 12.5f,
+                sizeX = 16f, sizeY = 16f, sizeZ = 1f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ - 0.15f,
+                baseColor = Color(0xFFFFEB3B),
+                outlineColor = Color.Black
+            )
+        }
+        "cherry" -> {
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 0f, cy = -46f, cz = 0f,
+                sizeX = 12f, sizeY = 12f, sizeZ = 12f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color(0xFFD32F2F),
+                outlineColor = Color.Black
+            )
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 4f, cy = -54f, cz = 2f,
+                sizeX = 2f, sizeY = 10f, sizeZ = 2f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ + 0.3f,
+                baseColor = Color(0xFF388E3C)
+            )
+        }
+        "plunger" -> {
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 0f, cy = -44f, cz = 0f,
+                sizeX = 16f, sizeY = 6f, sizeZ = 16f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color(0xFFC62828),
+                outlineColor = Color.Black
+            )
+            draw3DCuboid(
+                rx = rx, ry = ry,
+                cx = 0f, cy = -53f, cz = 0f,
+                sizeX = 2f, sizeY = 14f, sizeZ = 2f,
+                rotX = rotX, rotY = rotY, rotZ = rotZ,
+                baseColor = Color(0xFFD7CCC8),
+                outlineColor = Color.Black
+            )
+        }
     }
 
-    // 11. CARRIED CRATE PUZZLE PAYLOAD
+    // 14. CARRIED CRATE PUZZLE PAYLOAD
     val carriesCrate = progress >= 0.45f && (state is SimulationState.Success || (state is SimulationState.Running && progress >= 0.45f))
     if (carriesCrate && (leftArm == "Grabber" || rightArm == "Grabber" || leftArm == "Magnet" || rightArm == "Magnet")) {
         draw3DCuboid(
@@ -3439,6 +4760,7 @@ fun CustomLevelPlayScreen(
 ) {
     val level = viewModel.selectedCustomLevel ?: return
     var activeSlot by remember { mutableStateOf<SlotType?>(null) }
+    var playIn3D by remember { mutableStateOf(true) }
     
     val totalWeight = viewModel.getPartWeight(viewModel.selectedLegs) + 
             viewModel.getPartWeight(viewModel.selectedLeftArm) + 
@@ -3497,42 +4819,63 @@ fun CustomLevelPlayScreen(
             )
         }
 
+        // Custom Simulator Mode Selector Row
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "PUZZLE SIMULATOR",
+                color = CyberBlue,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Black,
+                fontFamily = FontFamily.Monospace
+            )
+            
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(6.dp))
+                    .background(CyberSteel)
+                    .padding(2.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                listOf(false to "2D Hologram", true to "Immersive 3D").forEach { (is3D, label) ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (playIn3D == is3D) CyberBlue else Color.Transparent)
+                            .clickable { playIn3D = is3D }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                    ) {
+                        Text(
+                            text = label,
+                            color = if (playIn3D == is3D) CyberWhite else CyberGray,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFamily = FontFamily.Monospace
+                        )
+                    }
+                }
+            }
+        }
+
+        // Live Custom Simulation / WebGL Box
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(180.dp)
+                .height(240.dp)
                 .clip(RoundedCornerShape(12.dp))
-                .border(2.dp, if (viewModel.simulationState is SimulationState.Success) CyberLime else CyberBlue, RoundedCornerShape(12.dp))
-                .background(Color.Black)
+                .border(1.5.dp, if (playIn3D) CyberBlue else CyberIron, RoundedCornerShape(12.dp))
+                .background(Color(0xFF070A13))
         ) {
-            Canvas(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .pointerInput(Unit) {
-                        detectDragGestures { change, dragAmount ->
-                            change.consume()
-                            viewModel.modelRotationAngleY += dragAmount.x * 0.015f
-                            viewModel.modelRotationAngleX -= dragAmount.y * 0.015f
-                        }
-                    }
-            ) {
-                val cols = 15
-                val rows = 10
-                for (c in 0..cols) {
-                    val x = c * (size.width / cols)
-                    drawLine(CyberSteel.copy(alpha = 0.15f), Offset(x, 0f), Offset(x, size.height))
-                }
-                for (r in 0..rows) {
-                    val y = r * (size.height / rows)
-                    drawLine(CyberSteel.copy(alpha = 0.15f), Offset(0f, y), Offset(size.width, y))
-                }
-
-                val groundY = size.height - 40f
-                drawLine(CyberSteel, Offset(0f, groundY), Offset(size.width, groundY), strokeWidth = 4f)
-
-                drawCustomWorldObstacles(level.obstaclesLayout, viewModel.simulationProgress, viewModel.simulationState)
-
-                drawRobotChassis(
+            if (playIn3D) {
+                val parsedHazard = level.obstaclesLayout.split(",").firstOrNull()?.split(":")?.firstOrNull() ?: "none"
+                ThreeGameplayViewer(
+                    robotX = 0f,
+                    robotY = if (viewModel.selectedLegs == "Hover Engine" || viewModel.selectedLegs == "Jetpack") 10f else 0f,
+                    robotZ = (1f - viewModel.simulationProgress) * 400f - 200f,
+                    speed = if (viewModel.simulationState == SimulationState.Running) 1.5f else 0f,
                     paintColor = profile?.selectedPaint ?: "#3D5AFE",
                     eyesType = profile?.selectedEyes ?: "digital",
                     hatType = profile?.selectedHat ?: "none",
@@ -3540,14 +4883,58 @@ fun CustomLevelPlayScreen(
                     leftArm = viewModel.selectedLeftArm,
                     rightArm = viewModel.selectedRightArm,
                     utility = viewModel.selectedUtility,
+                    hazardType = parsedHazard,
                     progress = viewModel.simulationProgress,
-                    state = viewModel.simulationState,
-                    rotX = viewModel.modelRotationAngleX,
-                    rotY = viewModel.modelRotationAngleY,
-                    cameraShake = viewModel.cameraShakeAmount
+                    simulationState = viewModel.simulationState,
+                    modifier = Modifier.fillMaxSize()
                 )
+            } else {
+                Canvas(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectDragGestures { change, dragAmount ->
+                                change.consume()
+                                viewModel.modelRotationAngleY += dragAmount.x * 0.015f
+                                viewModel.modelRotationAngleX -= dragAmount.y * 0.015f
+                            }
+                        }
+                ) {
+                    val cols = 15
+                    val rows = 10
+                    for (c in 0..cols) {
+                        val x = c * (size.width / cols)
+                        drawLine(CyberSteel.copy(alpha = 0.15f), Offset(x, 0f), Offset(x, size.height))
+                    }
+                    for (r in 0..rows) {
+                        val y = r * (size.height / rows)
+                        drawLine(CyberSteel.copy(alpha = 0.15f), Offset(0f, y), Offset(size.width, y))
+                    }
 
-                drawSimParticles(viewModel.particles)
+                    val groundY = size.height - 40f
+                    drawLine(CyberSteel, Offset(0f, groundY), Offset(size.width, groundY), strokeWidth = 4f)
+
+                    drawCustomWorldObstacles(level.obstaclesLayout, viewModel.simulationProgress, viewModel.simulationState)
+
+                    drawRobotChassis(
+                        paintColor = profile?.selectedPaint ?: "#3D5AFE",
+                        eyesType = profile?.selectedEyes ?: "digital",
+                        hatType = profile?.selectedHat ?: "none",
+                        legs = viewModel.selectedLegs,
+                        leftArm = viewModel.selectedLeftArm,
+                        rightArm = viewModel.selectedRightArm,
+                        utility = viewModel.selectedUtility,
+                        progress = viewModel.simulationProgress,
+                        state = viewModel.simulationState,
+                        rotX = viewModel.modelRotationAngleX,
+                        rotY = viewModel.modelRotationAngleY,
+                        cameraShake = viewModel.cameraShakeAmount,
+                        headStyle = viewModel.headStyle,
+                        torsoStyle = viewModel.torsoStyle
+                    )
+
+                    drawSimParticles(viewModel.particles)
+                }
             }
         }
 

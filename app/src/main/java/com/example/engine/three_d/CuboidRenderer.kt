@@ -109,7 +109,9 @@ object CuboidRenderer {
             }
 
             if (!wireframeOnly) {
-                val factor = 0.45f + face.normalLightFactor * 0.55f
+                // Among Us cel shading (flat light vs flat shadow)
+                val isLit = face.normalLightFactor > 0.45f
+                val factor = if (isLit) 1.0f else 0.65f
                 val shadedColor = Color(
                     red = (baseColor.red * factor).coerceIn(0f, 1f),
                     green = (baseColor.green * factor).coerceIn(0f, 1f),
@@ -119,10 +121,11 @@ object CuboidRenderer {
                 drawPath(path, shadedColor)
             }
 
+            // Bold cartoon outlines like in Among Us
             drawPath(
                 path = path,
-                color = outlineColor ?: baseColor.copy(alpha = 0.3f),
-                style = Stroke(width = 1.2f)
+                color = outlineColor ?: Color(0xFF070A13),
+                style = Stroke(width = 2.8f)
             )
         }
     }

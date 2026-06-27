@@ -25,7 +25,8 @@ enum class Screen {
     DailyChallenge,
     CustomLevelSelect,
     CustomLevelPlay,
-    CustomLevelEditor
+    CustomLevelEditor,
+    SpaceshipTasks
 }
 
 enum class SlotType {
@@ -96,6 +97,18 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
     // Interactive 3D Model rotation angles (in radians/degrees)
     var modelRotationAngleX by mutableStateOf(-0.2f)
     var modelRotationAngleY by mutableStateOf(0.4f)
+
+    // Robot Part Styles, Materials and Animations
+    var headStyle by mutableStateOf("Standard Dome")
+    var headMaterial by mutableStateOf("Chrome Metal")
+    var torsoStyle by mutableStateOf("Fusion Frame")
+    var torsoMaterial by mutableStateOf("Chrome Metal")
+    var armsStyle by mutableStateOf("Standard Claw")
+    var armsMaterial by mutableStateOf("Chrome Metal")
+    var legsStyle by mutableStateOf("Standard Biped")
+    var legsMaterial by mutableStateOf("Chrome Metal")
+    var activeAnimation by mutableStateOf("Idle Float")
+    var isAnimating by mutableStateOf(true)
 
     // Manual cockpit override modes
     var manualOverrideMode by mutableStateOf(false)
@@ -588,6 +601,128 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
+    fun getCustomWeight(): Int {
+        val baseWeight = getPartWeight(selectedLegs) + getPartWeight(selectedLeftArm) + getPartWeight(selectedRightArm) + getPartWeight(selectedUtility)
+        val styleWeight = when (headStyle) {
+            "Standard Dome" -> 0
+            "Stealth Visor" -> -2
+            "Retro Lens" -> 2
+            "Monocular Laser" -> 4
+            else -> 0
+        } + when (headMaterial) {
+            "Chrome Metal" -> 0
+            "Golden Cyber" -> 5
+            "Carbon Fiber" -> -4
+            "Rusty Scrapyard" -> 8
+            "Neon Grid" -> -2
+            else -> 0
+        } + when (torsoStyle) {
+            "Fusion Frame" -> 0
+            "Shielded Carapace" -> 15
+            "Minimal Chassis" -> -10
+            else -> 0
+        } + when (torsoMaterial) {
+            "Chrome Metal" -> 0
+            "Golden Cyber" -> 12
+            "Carbon Fiber" -> -8
+            "Rusty Scrapyard" -> 15
+            "Neon Grid" -> -4
+            else -> 0
+        } + when (armsMaterial) {
+            "Chrome Metal" -> 0
+            "Golden Cyber" -> 4
+            "Carbon Fiber" -> -3
+            "Rusty Scrapyard" -> 6
+            "Neon Grid" -> -1
+            else -> 0
+        } + when (legsMaterial) {
+            "Chrome Metal" -> 0
+            "Golden Cyber" -> 6
+            "Carbon Fiber" -> -5
+            "Rusty Scrapyard" -> 9
+            "Neon Grid" -> -2
+            else -> 0
+        }
+        return (baseWeight + styleWeight).coerceAtLeast(5)
+    }
+
+    fun getCustomPower(): Int {
+        val basePower = getPartPower(selectedLegs) + getPartPower(selectedLeftArm) + getPartPower(selectedRightArm) + getPartPower(selectedUtility)
+        val stylePower = when (headStyle) {
+            "Standard Dome" -> 0
+            "Stealth Visor" -> 2
+            "Retro Lens" -> 4
+            "Monocular Laser" -> 8
+            else -> 0
+        } + when (headMaterial) {
+            "Chrome Metal" -> 0
+            "Golden Cyber" -> 4
+            "Carbon Fiber" -> 0
+            "Rusty Scrapyard" -> 2
+            "Neon Grid" -> 12
+            else -> 0
+        } + when (torsoStyle) {
+            "Fusion Frame" -> 0
+            "Shielded Carapace" -> 5
+            "Minimal Chassis" -> -4
+            else -> 0
+        } + when (torsoMaterial) {
+            "Chrome Metal" -> 0
+            "Golden Cyber" -> 8
+            "Carbon Fiber" -> 0
+            "Rusty Scrapyard" -> 1
+            "Neon Grid" -> 15
+            else -> 0
+        } + when (armsMaterial) {
+            "Chrome Metal" -> 0
+            "Golden Cyber" -> 2
+            "Carbon Fiber" -> 0
+            "Rusty Scrapyard" -> 0
+            "Neon Grid" -> 6
+            else -> 0
+        } + when (legsMaterial) {
+            "Chrome Metal" -> 0
+            "Golden Cyber" -> 3
+            "Carbon Fiber" -> 0
+            "Rusty Scrapyard" -> 1
+            "Neon Grid" -> 8
+            else -> 0
+        }
+        return basePower + stylePower
+    }
+
+    fun getCustomEfficiency(): Int {
+        val totalWeight = getCustomWeight()
+        val totalPower = getCustomPower()
+        
+        // Base starting efficiency
+        var efficiency = 100f
+        
+        // Weight penalty
+        efficiency -= totalWeight * 0.4f
+        
+        // Power penalty/bonus (positive power consumes energy, negative power supplies energy)
+        if (totalPower > 0) {
+            efficiency -= totalPower * 0.5f
+        } else {
+            // Batteries actually generate surplus power, increasing efficiency!
+            efficiency += -totalPower * 0.3f
+        }
+        
+        // Material penalties/bonuses
+        val materials = listOf(headMaterial, torsoMaterial, armsMaterial, legsMaterial)
+        materials.forEach { mat ->
+            when (mat) {
+                "Rusty Scrapyard" -> efficiency -= 4f
+                "Carbon Fiber" -> efficiency += 3f
+                "Neon Grid" -> efficiency += 2f
+                "Golden Cyber" -> efficiency -= 1f
+            }
+        }
+        
+        return efficiency.coerceIn(10f, 100f).toInt()
+    }
+
     fun startCustomSimulation() {
         val level = selectedCustomLevel ?: return
         if (simulationState == SimulationState.Running) return
@@ -738,6 +873,12 @@ class GameViewModel(application: Application) : AndroidViewModel(application) {
                 simulationState = SimulationState.Success(starsEarned, 50, "You cleared the custom level with $goalsMet/$totalGoals goals accomplished!\n\n$resultsSummary")
                 simulationLog = "🏆 CUSTOM PUZZLE CLEARED: Stars: $starsEarned ⭐. Reward: +50 coins!"
             }
+        }
+    }
+
+    fun awardCustomCoins(amount: Int) {
+        viewModelScope.launch {
+            repository.awardCoins(amount)
         }
     }
 }

@@ -1,0 +1,1831 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Robot 3D Model Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #070A13;
+            font-family: monospace;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+        /* Subtle cyber indicator overlay */
+        #ui-overlay {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            pointer-events: none;
+            color: #3D5AFE;
+            font-size: 10px;
+            font-weight: bold;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            text-shadow: 0 0 5px #3D5AFE;
+        }
+        /* Scan active indicator tap hint */
+        #tap-tip {
+            position: absolute;
+            top: 26px;
+            left: 10px;
+            pointer-events: none;
+            color: #90A4AE;
+            font-size: 8px;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            animation: pulse-glow 2s infinite alternate;
+        }
+
+        /* Highly polished Cyberpunk Diagnostic Scanner Overlay */
+        #diagnostic-panel {
+            position: absolute;
+            bottom: 16px;
+            right: -320px; /* Animate offscreen initially */
+            width: 250px;
+            background: rgba(11, 16, 35, 0.88);
+            border: 1.5px solid #00F0FF;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.25);
+            border-radius: 8px;
+            padding: 12px;
+            color: #E2E8F0;
+            font-family: monospace;
+            transition: right 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+            pointer-events: auto;
+            z-index: 100;
+        }
+        #diagnostic-panel.active {
+            right: 16px;
+        }
+        .panel-header {
+            font-size: 11px;
+            font-weight: bold;
+            color: #00F0FF;
+            border-bottom: 1px solid rgba(0, 240, 255, 0.3);
+            padding-bottom: 6px;
+            margin-bottom: 8px;
+            letter-spacing: 1px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .panel-header::after {
+            content: "SCAN OK";
+            font-size: 7px;
+            background: rgba(0, 240, 255, 0.2);
+            color: #00F0FF;
+            padding: 1px 4px;
+            border-radius: 2px;
+            letter-spacing: 0.5px;
+        }
+        .panel-row {
+            font-size: 10px;
+            margin: 4px 0;
+            display: flex;
+            justify-content: space-between;
+        }
+        .label {
+            color: #708090;
+            font-weight: bold;
+        }
+        .val {
+            color: #FFFFFF;
+            font-weight: bold;
+        }
+        #diag-category {
+            color: #00E5FF;
+        }
+        /* Status Color Classes */
+        .status-nominal {
+            color: #00E676;
+            text-transform: uppercase;
+        }
+        .status-offline {
+            color: #757575;
+            text-transform: uppercase;
+        }
+        .status-online {
+            color: #00F0FF;
+            text-transform: uppercase;
+        }
+        .panel-footer {
+            margin-top: 8px;
+            font-size: 7px;
+            color: #00E5FF;
+            text-align: center;
+            opacity: 0.7;
+            letter-spacing: 0.5px;
+            border-top: 1px dashed rgba(0, 240, 255, 0.15);
+            padding-top: 6px;
+        }
+
+        @keyframes pulse-glow {
+            0% { opacity: 0.4; }
+            100% { opacity: 0.95; color: #00F0FF; }
+        }
+    </style>
+    <!-- Three.js & OrbitControls from dependable CDNs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+    <div id="ui-overlay">SYS // 3D GL-RENDER ACTIVE</div>
+    <div id="tap-tip">TAP A COMPONENT TO INITIATE TELEMETRY SCAN</div>
+    
+    <!-- Cyber Diagnostic Overlay Panel -->
+    <div id="diagnostic-panel">
+        <div class="panel-header">PART DIAGNOSTICS</div>
+        <div class="panel-row"><span class="label">MODULE:</span> <span class="val" id="diag-name">N/A</span></div>
+        <div class="panel-row"><span class="label">SECTION:</span> <span class="val" id="diag-category">N/A</span></div>
+        <div class="panel-row"><span class="label">STATUS:</span> <span class="val" id="diag-status">N/A</span></div>
+        <div class="panel-row"><span class="label">INTEGRITY:</span> <span class="val" id="diag-integrity">100%</span></div>
+        <div class="panel-row"><span class="label">MASS COEF:</span> <span class="val" id="diag-mass">0.0 kg</span></div>
+        <div class="panel-row"><span class="label">EFFICIENCY:</span> <span class="val" id="diag-efficiency">100%</span></div>
+        <div class="panel-footer">GRID ALIGNED // ROTATION ACTIVE</div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <script>
+        // RobotPart modular class definition
+        class RobotPart {
+            constructor(id, displayName, category, group) {
+                this.id = id; // "head", "chassis", "hat", "left_arm", "right_arm", "utility", "legs"
+                this.displayName = displayName;
+                this.category = category; // "HEAD_UNIT", "CORE_CHASSIS", "AUX_HAT", "ARM_LEFT", "ARM_RIGHT", "AUX_UTILITY", "MOBILITY"
+                this.group = group;
+
+                // Tag all descendents for Raycast interaction
+                this.group.traverse(child => {
+                    if (child.isMesh) {
+                        child.userData.partId = id;
+                        child.userData.partName = displayName;
+                        child.userData.partCategory = category;
+                    }
+                });
+            }
+        }
+
+        // Global components for dynamic updates and animation tracking
+        let scene, camera, renderer, controls;
+        let robotGroup;
+        let particlesGroup;
+        const particleCount = 80;
+        let robotParts = {};
+        let selectedPartId = null;
+        let selectionBoxHelper = null;
+        let raycaster, mouse;
+
+        let animatedParts = {
+            drills: [],
+            fans: [],
+            radars: [],
+            thrusters: [],
+            wheels: [],
+            leftArmGroup: null,
+            rightArmGroup: null,
+            leftBipedLeg: null,
+            rightBipedLeg: null,
+            springGroup: null,
+            claws: []
+        };
+        
+        // Robot state variables
+        let currentPaint = "#3D5AFE";
+        let currentEyes = "digital";
+        let currentHat = "none";
+        let currentLegs = "Standard Legs";
+        let currentLeftArm = "Standard Arm";
+        let currentRightArm = "Standard Arm";
+        let currentUtility = "Empty";
+
+        let currentHeadStyle = "Standard Dome";
+        let currentHeadMaterial = "Chrome Metal";
+        let currentTorsoStyle = "Fusion Frame";
+        let currentTorsoMaterial = "Chrome Metal";
+        let currentArmsStyle = "Standard Claw";
+        let currentArmsMaterial = "Chrome Metal";
+        let currentLegsStyle = "Standard Biped";
+        let currentLegsMaterial = "Chrome Metal";
+        let currentAnimation = "Idle Float";
+        let isAnimationPlaying = true;
+
+        // Init scene on window load
+        window.onload = function() {
+            initThree();
+            buildDefaultRobot();
+            animate();
+        };
+
+        function initThree() {
+            const container = document.getElementById('canvas-container');
+            
+            // Scene Setup
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x070A13);
+            scene.fog = new THREE.FogExp2(0x070A13, 0.035);
+
+            // Among Us Style Moving Starfield
+            const starGeo = new THREE.BufferGeometry();
+            const starCount = 300;
+            const starPositions = new Float32Array(starCount * 3);
+            const starSpeeds = [];
+
+            for (let i = 0; i < starCount; i++) {
+                starPositions[i * 3] = (Math.random() - 0.5) * 50;     // X
+                starPositions[i * 3 + 1] = Math.random() * 20 - 5;     // Y
+                starPositions[i * 3 + 2] = (Math.random() - 0.5) * 50; // Z
+                
+                starSpeeds.push({
+                    x: -0.01 - Math.random() * 0.04,
+                    y: (Math.random() - 0.5) * 0.005,
+                    z: (Math.random() - 0.5) * 0.01
+                });
+            }
+
+            starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+            const starMat = new THREE.PointsMaterial({
+                color: 0xFFFFFF,
+                size: 0.15,
+                transparent: true,
+                opacity: 0.8
+            });
+
+            const starField = new THREE.Points(starGeo, starMat);
+            scene.add(starField);
+            
+            scene.userData.starField = starField;
+            scene.userData.starSpeeds = starSpeeds;
+            scene.userData.starCount = starCount;
+
+            // Camera Setup
+            camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+            camera.position.set(0, 4, 10);
+
+            // Renderer Setup
+            renderer = new THREE.WebGLRenderer({ antialias: true });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(window.devicePixelRatio);
+            renderer.shadowMap.enabled = true;
+            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+            container.appendChild(renderer.domElement);
+
+            // Orbit Controls
+            controls = new THREE.OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = true;
+            controls.dampingFactor = 0.05;
+            controls.minDistance = 4;
+            controls.maxDistance = 18;
+            controls.maxPolarAngle = Math.PI / 2 - 0.02; // Prevent going below floor
+            controls.target.set(0, 2.2, 0);
+
+            // Lighting Setup
+            // 1. Cyber Ambient Light
+            const ambientLight = new THREE.AmbientLight(0x1a213a, 1.2);
+            scene.add(ambientLight);
+
+            // 2. High-contrast Key light
+            const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
+            dirLight.position.set(10, 15, 8);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            dirLight.shadow.camera.near = 0.5;
+            dirLight.shadow.camera.far = 25;
+            dirLight.shadow.camera.left = -6;
+            dirLight.shadow.camera.right = 6;
+            dirLight.shadow.camera.top = 6;
+            dirLight.shadow.camera.bottom = -6;
+            dirLight.shadow.bias = -0.0005;
+            scene.add(dirLight);
+
+            // 3. Cyber neon edge light (opposite to key light)
+            const edgeLight = new THREE.DirectionalLight(0x3D5AFE, 1.8);
+            edgeLight.position.set(-10, 8, -8);
+            scene.add(edgeLight);
+
+            // 4. Subtle accent fill from bottom-front
+            const fillLight = new THREE.DirectionalLight(0x00E676, 0.4);
+            fillLight.position.set(0, -5, 5);
+            scene.add(fillLight);
+
+            // Custom Spaceship Steel Deck Plating Floor (Among Us Style)
+            const floorGroup = new THREE.Group();
+            scene.add(floorGroup);
+            
+            // Solid plate deck base
+            const floorGeo = new THREE.PlaneGeometry(60, 60);
+            const floorMat = new THREE.MeshStandardMaterial({
+                color: 0x161D2E, // Spaceship dark steel gray-blue
+                roughness: 0.9,
+                metalness: 0.1
+            });
+            const deckBase = new THREE.Mesh(floorGeo, floorMat);
+            deckBase.rotation.x = -Math.PI / 2;
+            deckBase.receiveShadow = true;
+            floorGroup.add(deckBase);
+
+            // Bold dark floor seams (grid plates)
+            const seamMat = new THREE.LineBasicMaterial({ color: 0x05070D });
+            const seamGeo = new THREE.BufferGeometry();
+            const seamVertices = [];
+            
+            // Grid spacing of 4 units per metal panel
+            for (let i = -32; i <= 32; i += 4) {
+                // Vertical lines
+                seamVertices.push(i, 0.015, -32);
+                seamVertices.push(i, 0.015, 32);
+                // Horizontal lines
+                seamVertices.push(-32, 0.015, i);
+                seamVertices.push(32, 0.015, i);
+            }
+            seamGeo.setAttribute('position', new THREE.Float32BufferAttribute(seamVertices, 3));
+            const seams = new THREE.LineSegments(seamGeo, seamMat);
+            floorGroup.add(seams);
+
+            // Small circular deck rivet heads at panel corners
+            const rivetGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.01, 5);
+            const rivetMat = new THREE.MeshStandardMaterial({ color: 0x0C101A, roughness: 0.95 });
+            
+            // Populate rivets slightly inset from intersection corners
+            for (let x = -28; x <= 28; x += 4) {
+                for (let z = -28; z <= 28; z += 4) {
+                    const offsets = [
+                        [-0.15, -0.15], [0.15, -0.15], [-0.15, 0.15], [0.15, 0.15]
+                    ];
+                    offsets.forEach(off => {
+                        const rivet = new THREE.Mesh(rivetGeo, rivetMat);
+                        rivet.position.set(x + off[0], 0.02, z + off[1]);
+                        floorGroup.add(rivet);
+                    });
+                }
+            }
+
+            // Main Robot Group
+            robotGroup = new THREE.Group();
+            scene.add(robotGroup);
+
+            // Ambient Floating Dust Particle Field (Professional Garage Aesthetic)
+            particlesGroup = new THREE.Group();
+            scene.add(particlesGroup);
+
+            const particleGeo = new THREE.BufferGeometry();
+            const positions = new Float32Array(particleCount * 3);
+            const particleData = [];
+
+            for (let i = 0; i < particleCount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const radius = 1.0 + Math.random() * 4.5;
+                const x = Math.cos(angle) * radius;
+                const y = Math.random() * 6.0;
+                const z = Math.sin(angle) * radius;
+
+                positions[i * 3] = x;
+                positions[i * 3 + 1] = y;
+                positions[i * 3 + 2] = z;
+
+                particleData.push({
+                    speedY: 0.003 + Math.random() * 0.006,
+                    angleSpeed: (Math.random() - 0.5) * 0.006,
+                    radius: radius,
+                    angle: angle,
+                    baseY: y
+                });
+            }
+
+            particleGeo.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+
+            const particleMat = new THREE.PointsMaterial({
+                color: 0x3D5AFE,
+                size: 0.09,
+                transparent: true,
+                opacity: 0.65,
+                blending: THREE.AdditiveBlending,
+                depthWrite: false
+            });
+
+            const pointParticles = new THREE.Points(particleGeo, particleMat);
+            particlesGroup.add(pointParticles);
+            particlesGroup.userData = { data: particleData, geo: particleGeo };
+
+            // Raycasting & Interaction setup
+            raycaster = new THREE.Raycaster();
+            mouse = new THREE.Vector2();
+
+            window.addEventListener('mousemove', onMouseMove, false);
+            window.addEventListener('click', onMouseClick, false);
+            window.addEventListener('touchstart', onTouchStart, { passive: false });
+            window.addEventListener('resize', onWindowResize);
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- INTERACTIVITY HANDLERS ---
+        
+        function onMouseMove(event) {
+            // Normalized Device Coordinates
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(robotGroup.children, true);
+
+            let overInteractivePart = false;
+            for (let i = 0; i < intersects.length; i++) {
+                if (intersects[i].object.userData && intersects[i].object.userData.partId) {
+                    overInteractivePart = true;
+                    break;
+                }
+            }
+            document.body.style.cursor = overInteractivePart ? 'pointer' : 'default';
+        }
+
+        function onMouseClick(event) {
+            mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+            mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+            handlePartSelection();
+        }
+
+        function onTouchStart(event) {
+            if (event.touches.length > 0) {
+                mouse.x = (event.touches[0].clientX / window.innerWidth) * 2 - 1;
+                mouse.y = -(event.touches[0].clientY / window.innerHeight) * 2 + 1;
+                handlePartSelection();
+            }
+        }
+
+        function handlePartSelection() {
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObjects(robotGroup.children, true);
+
+            let clickedPartId = null;
+            for (let i = 0; i < intersects.length; i++) {
+                const obj = intersects[i].object;
+                if (obj.userData && obj.userData.partId) {
+                    clickedPartId = obj.userData.partId;
+                    break;
+                }
+            }
+
+            if (clickedPartId && robotParts[clickedPartId]) {
+                selectPart(clickedPartId);
+            } else {
+                clearSelection();
+            }
+        }
+
+        function selectPart(partId) {
+            const part = robotParts[partId];
+            if (!part) return;
+
+            selectedPartId = partId;
+
+            // Clear previous helper if any
+            if (selectionBoxHelper) {
+                scene.remove(selectionBoxHelper);
+            }
+
+            // Create a gorgeous neon green-blue wireframe bounding helper
+            selectionBoxHelper = new THREE.BoxHelper(part.group, 0x00F0FF);
+            selectionBoxHelper.material.color.setHex(0x00F0FF);
+            selectionBoxHelper.material.linewidth = 2;
+            scene.add(selectionBoxHelper);
+
+            // Fetch high-fidelity specifications for diagnostic readout
+            const specs = getPartSpecs(partId, part.displayName);
+
+            // Populating UI Overlay
+            document.getElementById('diag-name').innerText = specs.name.toUpperCase();
+            document.getElementById('diag-category').innerText = specs.category.toUpperCase();
+            document.getElementById('diag-status').innerText = specs.status.toUpperCase();
+            document.getElementById('diag-status').className = 'val ' + specs.statusStyle;
+            document.getElementById('diag-integrity').innerText = specs.integrity;
+            document.getElementById('diag-mass').innerText = specs.mass;
+            document.getElementById('diag-efficiency').innerText = specs.efficiency;
+
+            // Add active transition to diagnostic slide panel
+            document.getElementById('diagnostic-panel').classList.add('active');
+        }
+
+        function clearSelection() {
+            selectedPartId = null;
+            if (selectionBoxHelper) {
+                scene.remove(selectionBoxHelper);
+                selectionBoxHelper = null;
+            }
+            document.getElementById('diagnostic-panel').classList.remove('active');
+        }
+
+        // Generate customized telemetry statistics based on current selected specs
+        function getPartSpecs(partId, displayName) {
+            let name = displayName;
+            let category = "MODULE";
+            let status = "nominal";
+            let statusStyle = "status-nominal";
+            let integrity = "100%";
+            let mass = "4.0 kg";
+            let efficiency = "98%";
+
+            switch(partId) {
+                case "chassis":
+                    category = "CORE_CHASSIS";
+                    name = "Titanium Fusion Frame";
+                    status = "reactor stable";
+                    statusStyle = "status-nominal";
+                    mass = "35.0 kg";
+                    efficiency = "99%";
+                    break;
+                case "head":
+                    category = "HEAD_UNIT";
+                    name = currentEyes === "digital" ? "Digital Visor Dome" :
+                           currentEyes === "retro" ? "Retro Dual-Lens Core" :
+                           currentEyes === "laser" ? "Mono-Laser Visor" : "Goggles Optics Module";
+                    status = "scanning active";
+                    statusStyle = "status-online";
+                    mass = "4.5 kg";
+                    efficiency = "96%";
+                    break;
+                case "hat":
+                    category = "AUX_ATTACHMENT";
+                    name = currentHat === "none" ? "Empty Bay" :
+                           currentHat === "builder" ? "Construction Hardhat" :
+                           currentHat === "top_hat" ? "Dapper Top Hat" :
+                           currentHat === "builder_crown" ? "Royal Crown Dome" : "Antenna Transceiver";
+                    status = currentHat === "none" ? "offline" : "online";
+                    statusStyle = currentHat === "none" ? "status-offline" : "status-online";
+                    integrity = currentHat === "none" ? "0%" : "100%";
+                    mass = currentHat === "none" ? "0.0 kg" : "1.2 kg";
+                    efficiency = currentHat === "none" ? "0%" : "99%";
+                    break;
+                case "left_arm":
+                    category = "ARM_LEFT";
+                    name = currentLeftArm;
+                    status = "weapons loaded";
+                    statusStyle = "status-nominal";
+                    mass = currentLeftArm === "Standard Arm" ? "6.0 kg" :
+                           currentLeftArm === "Claw Arm" ? "9.5 kg" :
+                           currentLeftArm === "Laser Blaster" ? "12.0 kg" :
+                           currentLeftArm === "Drill Arm" ? "14.0 kg" :
+                           currentLeftArm === "Plasma Cannon" ? "18.5 kg" : "11.0 kg"; // Shield
+                    efficiency = currentLeftArm === "Plasma Cannon" ? "91%" : "95%";
+                    break;
+                case "right_arm":
+                    category = "ARM_RIGHT";
+                    name = currentRightArm;
+                    status = "weapons loaded";
+                    statusStyle = "status-nominal";
+                    mass = currentRightArm === "Standard Arm" ? "6.0 kg" :
+                           currentRightArm === "Claw Arm" ? "9.5 kg" :
+                           currentRightArm === "Laser Blaster" ? "12.0 kg" :
+                           currentRightArm === "Drill Arm" ? "14.0 kg" :
+                           currentRightArm === "Plasma Cannon" ? "18.5 kg" : "11.0 kg"; // Shield
+                    efficiency = currentRightArm === "Plasma Cannon" ? "91%" : "95%";
+                    break;
+                case "utility":
+                    category = "AUX_UTILITY";
+                    name = currentUtility === "Empty" ? "Empty Slot" : currentUtility;
+                    status = currentUtility === "Empty" ? "offline" : "system online";
+                    statusStyle = currentUtility === "Empty" ? "status-offline" : "status-online";
+                    integrity = currentUtility === "Empty" ? "0%" : "100%";
+                    mass = currentUtility === "Empty" ? "0.0 kg" :
+                           currentUtility === "Cooling System" ? "12.0 kg" :
+                           currentUtility === "Turbo Battery" ? "15.0 kg" : "8.5 kg";
+                    efficiency = currentUtility === "Empty" ? "0%" : "97%";
+                    break;
+                case "legs":
+                    category = "MOBILITY_SYSTEM";
+                    name = currentLegs;
+                    status = "traction active";
+                    statusStyle = "status-nominal";
+                    mass = currentLegs === "Standard Legs" ? "18.0 kg" :
+                           currentLegs === "Heavy Tracks" ? "45.0 kg" :
+                           currentLegs === "All-Terrain Wheels" ? "22.0 kg" :
+                           currentLegs === "Hover Engine" ? "15.0 kg" :
+                           currentLegs === "Jump Springs" ? "14.0 kg" : "25.0 kg"; // Jetpack
+                    efficiency = currentLegs === "Hover Engine" ? "97%" : "92%";
+                    break;
+            }
+
+            return { name, category, status, statusStyle, integrity, mass, efficiency };
+        }
+
+        // --- ROBOT MODEL BUILDING BLOCKS ---
+        
+        function buildDefaultRobot() {
+            rebuildRobot();
+        }
+
+        function clearGroup(group) {
+            while(group.children.length > 0){ 
+                const obj = group.children[0];
+                group.remove(obj); 
+            }
+        }
+
+        function createOutlinedMesh(geometry, material, outlineScale = 1.08) {
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+            
+            const outlineMaterial = new THREE.MeshBasicMaterial({
+                color: 0x070A13,
+                side: THREE.BackSide
+            });
+            const outlineMesh = new THREE.Mesh(geometry, outlineMaterial);
+            outlineMesh.scale.set(outlineScale, outlineScale, outlineScale);
+            mesh.add(outlineMesh);
+            
+            return mesh;
+        }
+
+        function createMaterial(materialName, defaultColor) {
+            let colorHex;
+            if (typeof defaultColor === "string") {
+                let hexStr = defaultColor.replace("#", "");
+                if (hexStr.length === 8) {
+                    hexStr = hexStr.substring(2); // strip alpha prefix
+                }
+                colorHex = parseInt("0x" + hexStr);
+            } else if (typeof defaultColor === "number") {
+                colorHex = defaultColor;
+                if (colorHex > 0xFFFFFF) {
+                    colorHex = colorHex & 0xFFFFFF; // mask off alpha channel bits
+                }
+            } else {
+                colorHex = 0x3D5AFE;
+            }
+
+            switch (materialName) {
+                case "Chrome Metal":
+                    return new THREE.MeshStandardMaterial({
+                        color: colorHex,
+                        roughness: 0.15,
+                        metalness: 0.95
+                    });
+                case "Golden Cyber":
+                    return new THREE.MeshStandardMaterial({
+                        color: 0xFFD600,
+                        roughness: 0.15,
+                        metalness: 0.95
+                    });
+                case "Carbon Fiber":
+                    // Dark carbon fiber style, with a subtle tint of the paint color
+                    const r = ((colorHex >> 16) & 255) * 0.12;
+                    const g = ((colorHex >> 8) & 255) * 0.12;
+                    const b = (colorHex & 255) * 0.12;
+                    const darkColor = (Math.round(r) << 16) | (Math.round(g) << 8) | Math.round(b);
+                    return new THREE.MeshStandardMaterial({
+                        color: darkColor,
+                        roughness: 0.6,
+                        metalness: 0.3
+                    });
+                case "Rusty Scrapyard":
+                    // Rusty mixed with paint color
+                    const paintR = ((colorHex >> 16) & 255);
+                    const paintG = ((colorHex >> 8) & 255);
+                    const paintB = (colorHex & 255);
+                    const mixedR = Math.round(0.7 * 0x8D + 0.3 * paintR);
+                    const mixedG = Math.round(0.7 * 0x52 + 0.3 * paintG);
+                    const mixedB = Math.round(0.7 * 0x3C + 0.3 * paintB);
+                    const rustColor = (mixedR << 16) | (mixedG << 8) | mixedB;
+                    return new THREE.MeshStandardMaterial({
+                        color: rustColor,
+                        roughness: 0.85,
+                        metalness: 0.1
+                    });
+                case "Neon Grid":
+                    return new THREE.MeshStandardMaterial({
+                        color: colorHex,
+                        roughness: 0.2,
+                        metalness: 0.5,
+                        emissive: colorHex,
+                        emissiveIntensity: 0.8
+                    });
+                case "Crewmate Cel":
+                    return new THREE.MeshToonMaterial({
+                        color: colorHex,
+                        roughness: 0.95,
+                        metalness: 0.0
+                    });
+                default:
+                    return new THREE.MeshStandardMaterial({
+                        color: colorHex,
+                        roughness: 0.3,
+                        metalness: 0.8
+                    });
+            }
+        }
+
+        function rebuildRobot() {
+            clearGroup(robotGroup);
+            robotParts = {};
+            animatedParts = {
+                drills: [],
+                fans: [],
+                radars: [],
+                thrusters: [],
+                wheels: [],
+                leftArmGroup: null,
+                rightArmGroup: null,
+                leftBipedLeg: null,
+                rightBipedLeg: null,
+                springGroup: null,
+                claws: []
+            };
+
+            // Setup materials based on color parameters
+            let paintStr = currentPaint || "#3D5AFE";
+            paintStr = paintStr.replace("#", "");
+            if (paintStr.length === 8) {
+                paintStr = paintStr.substring(2); // strip alpha prefix
+            }
+            const paintColorHex = parseInt("0x" + paintStr);
+            
+            // Dynamic materials for parts
+            const headMat = createMaterial(currentHeadMaterial, paintColorHex);
+            const torsoMat = createMaterial(currentTorsoMaterial, paintColorHex);
+            const armsMat = createMaterial(currentArmsMaterial, paintColorHex);
+            const legsMat = createMaterial(currentLegsMaterial, paintColorHex);
+
+            const metallicMaterial = torsoMat; // backward compatibility fallback
+            
+            const darkMetalMaterial = new THREE.MeshStandardMaterial({
+                color: 0x222633,
+                roughness: 0.4,
+                metalness: 0.9
+            });
+
+            const glowingCyanMaterial = new THREE.MeshBasicMaterial({
+                color: 0x00F0FF
+            });
+
+            const glowingOrangeMaterial = new THREE.MeshBasicMaterial({
+                color: 0xFF5722
+            });
+
+            const goldMaterial = new THREE.MeshStandardMaterial({
+                color: 0xFFD600,
+                roughness: 0.2,
+                metalness: 0.9
+            });
+
+            // Base position offsets (depends on legs)
+            let heightOffset = 1.6;
+            if (currentLegs === "Hover Engine") {
+                heightOffset = 2.1;
+            } else if (currentLegs === "Jetpack") {
+                heightOffset = 1.9;
+            }
+
+            // Create secondary group for breathing offset
+            const offsetGroup = new THREE.Group();
+            offsetGroup.position.y = heightOffset;
+            offsetGroup.name = "BreathingRoot";
+            robotGroup.add(offsetGroup);
+
+            // Container sub-groups for precise part bounds & raycasting selection
+            const chassisGroup = new THREE.Group();
+            offsetGroup.add(chassisGroup);
+
+            const headGroup = new THREE.Group();
+            offsetGroup.add(headGroup);
+
+            const hatGroup = new THREE.Group();
+            offsetGroup.add(hatGroup);
+
+            const leftArmGroup = new THREE.Group();
+            offsetGroup.add(leftArmGroup);
+            animatedParts.leftArmGroup = leftArmGroup;
+
+            const rightArmGroup = new THREE.Group();
+            offsetGroup.add(rightArmGroup);
+            animatedParts.rightArmGroup = rightArmGroup;
+
+            const utilityGroup = new THREE.Group();
+            offsetGroup.add(utilityGroup);
+
+            const legsGroup = new THREE.Group();
+            robotGroup.add(legsGroup);
+
+            // 1. CHASSIS (CORE BODY)
+            if (currentTorsoStyle === "Crewmate Suit") {
+                // Main Crewmate capsule body
+                const bodyCyl = createOutlinedMesh(new THREE.CylinderGeometry(0.55, 0.55, 0.8, 24), torsoMat);
+                bodyCyl.position.set(0, 0, 0);
+                chassisGroup.add(bodyCyl);
+
+                const topDome = createOutlinedMesh(new THREE.SphereGeometry(0.55, 24, 12, 0, Math.PI * 2, 0, Math.PI / 2), torsoMat);
+                topDome.position.set(0, 0.4, 0);
+                chassisGroup.add(topDome);
+
+                const bottomDome = createOutlinedMesh(new THREE.SphereGeometry(0.55, 24, 12, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), torsoMat);
+                bottomDome.position.set(0, -0.4, 0);
+                chassisGroup.add(bottomDome);
+
+                // Oxygen backpack canister on the back
+                const packGeo = new THREE.BoxGeometry(0.45, 0.9, 0.32);
+                const backpack = createOutlinedMesh(packGeo, torsoMat);
+                backpack.position.set(0, 0.05, -0.6);
+                chassisGroup.add(backpack);
+
+            } else if (currentTorsoStyle === "Shielded Carapace") {
+                const bodyGeo = new THREE.CylinderGeometry(0.65, 0.75, 1.4, 8);
+                const body = createOutlinedMesh(bodyGeo, torsoMat);
+                chassisGroup.add(body);
+
+                // Heavy side armored shields
+                const plateGeo = new THREE.BoxGeometry(0.18, 1.2, 0.75);
+                const leftPlate = createOutlinedMesh(plateGeo, darkMetalMaterial);
+                leftPlate.position.set(-0.72, 0, 0);
+                const rightPlate = createOutlinedMesh(plateGeo, darkMetalMaterial);
+                rightPlate.position.set(0.72, 0, 0);
+                chassisGroup.add(leftPlate);
+                chassisGroup.add(rightPlate);
+            } else if (currentTorsoStyle === "Minimal Chassis") {
+                const centralStrut = createOutlinedMesh(new THREE.CylinderGeometry(0.18, 0.18, 1.3, 8), darkMetalMaterial);
+                chassisGroup.add(centralStrut);
+
+                // Exposed reinforcement cages
+                const cageGeo = new THREE.TorusGeometry(0.42, 0.04, 8, 16);
+                const cage1 = createOutlinedMesh(cageGeo, goldMaterial);
+                cage1.position.set(0, 0.35, 0);
+                cage1.rotation.x = Math.PI / 2;
+                const cage2 = createOutlinedMesh(cageGeo, goldMaterial);
+                cage2.position.set(0, -0.35, 0);
+                cage2.rotation.x = Math.PI / 2;
+                chassisGroup.add(cage1);
+                chassisGroup.add(cage2);
+            } else { // "Fusion Frame"
+                const bodyGeo = new THREE.BoxGeometry(1.2, 1.4, 0.9);
+                const body = createOutlinedMesh(bodyGeo, torsoMat);
+                chassisGroup.add(body);
+            }
+
+            if (currentTorsoStyle !== "Crewmate Suit") {
+                // Chest Core (Glowing power reactor)
+                const coreGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.15, 16);
+                coreGeo.rotateX(Math.PI / 2);
+                const core = createOutlinedMesh(coreGeo, glowingCyanMaterial);
+                core.position.set(0, 0.15, 0.45);
+                chassisGroup.add(core);
+
+                // Collar/Shoulder Mounts
+                const shoulderBeamGeo = new THREE.BoxGeometry(1.8, 0.25, 0.4);
+                const shoulderBeam = createOutlinedMesh(shoulderBeamGeo, darkMetalMaterial);
+                shoulderBeam.position.set(0, 0.5, 0);
+                chassisGroup.add(shoulderBeam);
+            }
+
+            // Define Chassis Component
+            robotParts["chassis"] = new RobotPart("chassis", currentTorsoStyle, "CORE_CHASSIS", chassisGroup);
+
+            // 2. HEAD & EYES
+            const neckGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.2, 12);
+            const neck = new THREE.Mesh(neckGeo, darkMetalMaterial);
+            neck.position.set(0, 0.8, 0);
+            headGroup.add(neck);
+
+            let headMesh;
+            if (currentHeadStyle === "Crewmate Visor") {
+                // Smooth rounded helmet dome
+                const shape = new THREE.SphereGeometry(0.44, 24, 24);
+                headMesh = createOutlinedMesh(shape, headMat);
+                headMesh.position.set(0, 1.15, 0);
+            } else if (currentHeadStyle === "Stealth Visor") {
+                const shape = new THREE.ConeGeometry(0.5, 0.7, 4);
+                shape.rotateY(Math.PI / 4);
+                headMesh = createOutlinedMesh(shape, headMat);
+                headMesh.position.set(0, 1.15, 0);
+            } else if (currentHeadStyle === "Retro Lens") {
+                const shape = new THREE.CylinderGeometry(0.35, 0.35, 0.7, 16);
+                shape.rotateZ(Math.PI / 2);
+                headMesh = createOutlinedMesh(shape, headMat);
+                headMesh.position.set(0, 1.15, 0);
+            } else if (currentHeadStyle === "Monocular Laser") {
+                const shape = new THREE.SphereGeometry(0.42, 16, 16);
+                headMesh = createOutlinedMesh(shape, headMat);
+                headMesh.position.set(0, 1.15, 0);
+            } else { // "Standard Dome"
+                const headGeo = new THREE.BoxGeometry(0.75, 0.65, 0.7);
+                headMesh = createOutlinedMesh(headGeo, headMat);
+                headMesh.position.set(0, 1.15, 0);
+            }
+            headGroup.add(headMesh);
+
+            // Render selected eyes (Skip if Crewmate Visor is selected)
+            if (currentHeadStyle === "Crewmate Visor") {
+                // Large cyan glass visor mesh
+                const visorGeo = new THREE.BoxGeometry(0.55, 0.32, 0.15);
+                const visorMat = new THREE.MeshStandardMaterial({
+                    color: 0x80DEEA,
+                    roughness: 0.1,
+                    metalness: 0.1,
+                    emissive: 0x00E5FF,
+                    emissiveIntensity: 0.25
+                });
+                const visor = createOutlinedMesh(visorGeo, visorMat);
+                visor.position.set(0, 1.15, 0.38);
+                headGroup.add(visor);
+
+                // Visor glossy white reflection highlight
+                const highlightGeo = new THREE.BoxGeometry(0.12, 0.06, 0.05);
+                const highlight = new THREE.Mesh(highlightGeo, new THREE.MeshBasicMaterial({ color: 0xFFFFFF }));
+                highlight.position.set(-0.15, 1.22, 0.46);
+                headGroup.add(highlight);
+
+            } else if (currentEyes === "digital" || currentHeadStyle === "Stealth Visor") {
+                const eyeGeo = new THREE.BoxGeometry(0.5, 0.08, 0.05);
+                const eye = createOutlinedMesh(eyeGeo, glowingCyanMaterial);
+                eye.position.set(0, 1.18, 0.35);
+                headGroup.add(eye);
+            } else if (currentEyes === "retro" || currentHeadStyle === "Retro Lens") {
+                const lensGeo = new THREE.CylinderGeometry(0.12, 0.1, 0.2, 12);
+                lensGeo.rotateX(Math.PI / 2);
+                
+                const leftLens = createOutlinedMesh(lensGeo, darkMetalMaterial);
+                leftLens.position.set(-0.18, 1.15, 0.38);
+                const leftGlass = createOutlinedMesh(new THREE.SphereGeometry(0.08, 8, 8), glowingCyanMaterial);
+                leftGlass.position.set(-0.18, 1.15, 0.48);
+                
+                const rightLens = createOutlinedMesh(lensGeo, darkMetalMaterial);
+                rightLens.position.set(0.18, 1.15, 0.38);
+                const rightGlass = createOutlinedMesh(new THREE.SphereGeometry(0.08, 8, 8), glowingCyanMaterial);
+                rightGlass.position.set(0.18, 1.15, 0.48);
+                
+                headGroup.add(leftLens);
+                headGroup.add(leftGlass);
+                headGroup.add(rightLens);
+                headGroup.add(rightGlass);
+            } else if (currentEyes === "laser" || currentHeadStyle === "Monocular Laser") {
+                const visorGeo = new THREE.BoxGeometry(0.55, 0.15, 0.06);
+                const visor = createOutlinedMesh(visorGeo, glowingOrangeMaterial);
+                visor.position.set(0, 1.2, 0.34);
+                headGroup.add(visor);
+                
+                const pupilGeo = new THREE.SphereGeometry(0.06, 8, 8);
+                const pupil = createOutlinedMesh(pupilGeo, new THREE.MeshBasicMaterial({ color: 0xFF0000 }));
+                pupil.position.set(0, 1.2, 0.37);
+                headGroup.add(pupil);
+            } else if (currentEyes === "glass") {
+                const frameGeo = new THREE.BoxGeometry(0.6, 0.22, 0.08);
+                const frame = createOutlinedMesh(frameGeo, goldMaterial);
+                frame.position.set(0, 1.18, 0.34);
+                headGroup.add(frame);
+
+                const glassGeo = new THREE.SphereGeometry(0.1, 8, 8);
+                const gMat = new THREE.MeshBasicMaterial({ color: 0x00FF88 });
+                const leftGlass = createOutlinedMesh(glassGeo, gMat);
+                leftGlass.position.set(-0.16, 1.18, 0.37);
+                const rightGlass = createOutlinedMesh(glassGeo, gMat);
+                rightGlass.position.set(0.16, 1.18, 0.37);
+                headGroup.add(leftGlass);
+                headGroup.add(rightGlass);
+            }
+
+            // Define Head Component
+            robotParts["head"] = new RobotPart("head", currentHeadStyle, "HEAD_UNIT", headGroup);
+
+            // 3. HATS (Selected Hat Type)
+            if (currentHat !== "none") {
+                if (currentHat === "builder") {
+                    const hatBaseGeo = new THREE.SphereGeometry(0.48, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2);
+                    const builderHat = new THREE.Mesh(hatBaseGeo, goldMaterial);
+                    builderHat.position.set(0, 1.35, 0);
+                    
+                    const brimGeo = new THREE.BoxGeometry(0.9, 0.04, 1.1);
+                    const brim = new THREE.Mesh(brimGeo, goldMaterial);
+                    brim.position.set(0, 1.35, 0.05);
+                    
+                    hatGroup.add(builderHat);
+                    hatGroup.add(brim);
+                } else if (currentHat === "top_hat") {
+                    const cylinderGeo = new THREE.CylinderGeometry(0.32, 0.32, 0.55, 16);
+                    const dapperHat = new THREE.Mesh(cylinderGeo, new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 }));
+                    dapperHat.position.set(0, 1.65, 0);
+                    dapperHat.castShadow = true;
+                    
+                    const brimGeo = new THREE.CylinderGeometry(0.46, 0.46, 0.03, 16);
+                    const brim = new THREE.Mesh(brimGeo, new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.8 }));
+                    brim.position.set(0, 1.39, 0);
+                    brim.castShadow = true;
+
+                    const bandGeo = new THREE.CylinderGeometry(0.33, 0.33, 0.08, 16);
+                    const band = new THREE.Mesh(bandGeo, new THREE.MeshStandardMaterial({ color: 0xD50000, roughness: 0.5 }));
+                    band.position.set(0, 1.45, 0);
+
+                    hatGroup.add(dapperHat);
+                    hatGroup.add(brim);
+                    hatGroup.add(band);
+                } else if (currentHat === "builder_crown") {
+                    const crownBase = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.32, 0.12, 16), goldMaterial);
+                    crownBase.position.set(0, 1.48, 0);
+                    hatGroup.add(crownBase);
+
+                    for (let i = 0; i < 5; i++) {
+                        const angle = (i / 5) * Math.PI * 2;
+                        const peak = new THREE.Mesh(new THREE.ConeGeometry(0.08, 0.22, 4), goldMaterial);
+                        peak.position.set(Math.cos(angle) * 0.3, 1.62, Math.sin(angle) * 0.3);
+                        peak.rotation.y = angle;
+                        peak.rotation.z = -0.15;
+                        hatGroup.add(peak);
+                    }
+                } else if (currentHat === "antenna") {
+                    const rodGeo = new THREE.CylinderGeometry(0.03, 0.03, 0.4, 8);
+                    const rod = new THREE.Mesh(rodGeo, darkMetalMaterial);
+                    rod.position.set(0, 1.6, 0);
+                    
+                    const tipGeo = new THREE.SphereGeometry(0.08, 8, 8);
+                    const tip = new THREE.Mesh(tipGeo, glowingOrangeMaterial);
+                    tip.position.set(0, 1.82, 0);
+
+                    hatGroup.add(rod);
+                    hatGroup.add(tip);
+                } else if (currentHat === "sprout") {
+                    // Stalk
+                    const stalkGeo = new THREE.CylinderGeometry(0.02, 0.02, 0.25, 8);
+                    const stalkMat = new THREE.MeshStandardMaterial({ color: 0x5D4037, roughness: 0.9 });
+                    const stalk = createOutlinedMesh(stalkGeo, stalkMat);
+                    stalk.position.set(0, 1.45, 0);
+                    hatGroup.add(stalk);
+
+                    // Leaves
+                    const leafMat = new THREE.MeshStandardMaterial({ color: 0x4CAF50, roughness: 0.8 });
+                    
+                    const leafGeoL = new THREE.BoxGeometry(0.18, 0.05, 0.12);
+                    const leafL = createOutlinedMesh(leafGeoL, leafMat);
+                    leafL.position.set(-0.08, 1.55, 0);
+                    leafL.rotation.z = Math.PI / 6;
+                    hatGroup.add(leafL);
+
+                    const leafGeoR = new THREE.BoxGeometry(0.18, 0.05, 0.12);
+                    const leafR = createOutlinedMesh(leafGeoR, leafMat);
+                    leafR.position.set(0.08, 1.55, 0);
+                    leafR.rotation.z = -Math.PI / 6;
+                    hatGroup.add(leafR);
+                } else if (currentHat === "toilet_paper") {
+                    // Outer roll
+                    const tpGeo = new THREE.CylinderGeometry(0.25, 0.25, 0.35, 16);
+                    tpGeo.rotateX(Math.PI / 2);
+                    const tpMat = new THREE.MeshStandardMaterial({ color: 0xEEEEEE, roughness: 0.9 });
+                    const tp = createOutlinedMesh(tpGeo, tpMat);
+                    tp.position.set(0, 1.48, 0);
+                    hatGroup.add(tp);
+
+                    // Inner cardboard core
+                    const coreGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.37, 12);
+                    coreGeo.rotateX(Math.PI / 2);
+                    const coreMat = new THREE.MeshStandardMaterial({ color: 0x8D6E63, roughness: 0.9 });
+                    const cardboardCore = new THREE.Mesh(coreGeo, coreMat);
+                    cardboardCore.position.set(0, 1.48, 0);
+                    hatGroup.add(cardboardCore);
+
+                    // Hanging piece of paper
+                    const hangGeo = new THREE.BoxGeometry(0.24, 0.35, 0.02);
+                    const hangPaper = createOutlinedMesh(hangGeo, tpMat);
+                    hangPaper.position.set(0, 1.32, -0.25);
+                    hatGroup.add(hangPaper);
+                } else if (currentHat === "egg") {
+                    // Egg white - flat splat
+                    const whiteGeo = new THREE.CylinderGeometry(0.48, 0.44, 0.04, 16);
+                    const whiteMat = new THREE.MeshStandardMaterial({ color: 0xF5F5F5, roughness: 0.85 });
+                    const eggWhite = createOutlinedMesh(whiteGeo, whiteMat);
+                    eggWhite.position.set(0, 1.35, 0);
+                    hatGroup.add(eggWhite);
+
+                    // Yellow yolk in center
+                    const yolkGeo = new THREE.SphereGeometry(0.18, 12, 12, 0, Math.PI * 2, 0, Math.PI / 2);
+                    const yolkMat = new THREE.MeshStandardMaterial({ color: 0xFFC107, roughness: 0.4, metalness: 0.1 });
+                    const yolk = createOutlinedMesh(yolkGeo, yolkMat);
+                    yolk.position.set(-0.05, 1.37, 0.05);
+                    hatGroup.add(yolk);
+                } else if (currentHat === "sticky_note") {
+                    // Yellow note slapped on the visor
+                    const noteGeo = new THREE.BoxGeometry(0.38, 0.38, 0.02);
+                    const noteMat = new THREE.MeshStandardMaterial({ color: 0xFFEB3B, roughness: 0.9 });
+                    const note = createOutlinedMesh(noteGeo, noteMat);
+                    note.position.set(0.05, 1.15, 0.45);
+                    note.rotation.z = -0.15;
+                    hatGroup.add(note);
+
+                    const textMat = new THREE.MeshBasicMaterial({ color: 0x111111 });
+                    
+                    // "D"
+                    const d1 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.18, 0.01), textMat);
+                    d1.position.set(-0.1, 1.15, 0.465);
+                    d1.rotation.z = -0.15;
+                    hatGroup.add(d1);
+                    
+                    const d2 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.01), textMat);
+                    d2.position.set(-0.06, 1.22, 0.465);
+                    d2.rotation.z = -0.15;
+                    hatGroup.add(d2);
+
+                    const d3 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.01), textMat);
+                    d3.position.set(-0.06, 1.08, 0.465);
+                    d3.rotation.z = -0.15;
+                    hatGroup.add(d3);
+
+                    const d4 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.12, 0.01), textMat);
+                    d4.position.set(-0.03, 1.15, 0.465);
+                    d4.rotation.z = -0.15;
+                    hatGroup.add(d4);
+
+                    // "U"
+                    const u1 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.14, 0.01), textMat);
+                    u1.position.set(0.04, 1.16, 0.465);
+                    u1.rotation.z = -0.15;
+                    hatGroup.add(u1);
+
+                    const u2 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.14, 0.01), textMat);
+                    u2.position.set(0.12, 1.14, 0.465);
+                    u2.rotation.z = -0.15;
+                    hatGroup.add(u2);
+
+                    const u3 = new THREE.Mesh(new THREE.BoxGeometry(0.12, 0.04, 0.01), textMat);
+                    u3.position.set(0.08, 1.07, 0.465);
+                    u3.rotation.z = -0.15;
+                    hatGroup.add(u3);
+
+                    // "M"
+                    const m1 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.18, 0.01), textMat);
+                    m1.position.set(0.18, 1.13, 0.465);
+                    m1.rotation.z = -0.15;
+                    hatGroup.add(m1);
+
+                    const m2 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.18, 0.01), textMat);
+                    m2.position.set(0.28, 1.11, 0.465);
+                    m2.rotation.z = -0.15;
+                    hatGroup.add(m2);
+
+                    const m3 = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.04, 0.01), textMat);
+                    m3.position.set(0.23, 1.18, 0.465);
+                    m3.rotation.z = -0.15;
+                    hatGroup.add(m3);
+                } else if (currentHat === "cherry") {
+                    const ballGeo = new THREE.SphereGeometry(0.24, 16, 16);
+                    const ballMat = new THREE.MeshStandardMaterial({ color: 0xD32F2F, roughness: 0.2, metalness: 0.1 });
+                    const cherry = createOutlinedMesh(ballGeo, ballMat);
+                    cherry.position.set(0, 1.5, 0);
+                    hatGroup.add(cherry);
+
+                    const stemMat = new THREE.MeshStandardMaterial({ color: 0x388E3C, roughness: 0.9 });
+                    const stemGeo = new THREE.CylinderGeometry(0.015, 0.015, 0.4, 8);
+                    const stem = createOutlinedMesh(stemGeo, stemMat);
+                    stem.position.set(0.08, 1.72, 0.08);
+                    stem.rotation.z = -Math.PI / 6;
+                    stem.rotation.x = Math.PI / 12;
+                    hatGroup.add(stem);
+                } else if (currentHat === "plunger") {
+                    const cupGeo = new THREE.CylinderGeometry(0.05, 0.28, 0.2, 16);
+                    const cupMat = new THREE.MeshStandardMaterial({ color: 0xC62828, roughness: 0.7, metalness: 0.1 });
+                    const cup = createOutlinedMesh(cupGeo, cupMat);
+                    cup.position.set(0, 1.42, 0);
+                    hatGroup.add(cup);
+
+                    const stickMat = new THREE.MeshStandardMaterial({ color: 0xD7CCC8, roughness: 0.9 });
+                    const stickGeo = new THREE.CylinderGeometry(0.025, 0.025, 0.55, 8);
+                    const stick = createOutlinedMesh(stickGeo, stickMat);
+                    stick.position.set(0, 1.74, 0);
+                    hatGroup.add(stick);
+                }
+                
+                // Define Hat Component
+                robotParts["hat"] = new RobotPart("hat", currentHat, "AUX_HAT", hatGroup);
+            }
+
+            // 4. ARMS & WEAPONS (LEFT & RIGHT)
+            buildArm(leftArmGroup, true, currentLeftArm, paintColorHex, armsMat, darkMetalMaterial, goldMaterial, glowingCyanMaterial, glowingOrangeMaterial);
+            robotParts["left_arm"] = new RobotPart("left_arm", currentLeftArm, "ARM_LEFT", leftArmGroup);
+
+            buildArm(rightArmGroup, false, currentRightArm, paintColorHex, armsMat, darkMetalMaterial, goldMaterial, glowingCyanMaterial, glowingOrangeMaterial);
+            robotParts["right_arm"] = new RobotPart("right_arm", currentRightArm, "ARM_RIGHT", rightArmGroup);
+
+            // 5. UTILITY BACKPACK
+            if (currentUtility !== "Empty") {
+                utilityGroup.position.set(0, 0, -0.6);
+
+                const caseColor = (currentUtility === "Cooling System") ? 0x00E5FF : 
+                                  (currentUtility === "Turbo Battery") ? 0x00E676 : 
+                                  (currentUtility === "Object Detector" || currentUtility === "Heat Sensor") ? 0xFF9100 : 0x757575;
+                                  
+                const caseMat = new THREE.MeshStandardMaterial({ color: caseColor, metalness: 0.7, roughness: 0.3 });
+                const caseGeo = new THREE.BoxGeometry(0.75, 0.9, 0.4);
+                const pack = new THREE.Mesh(caseGeo, caseMat);
+                pack.castShadow = true;
+                utilityGroup.add(pack);
+
+                if (currentUtility === "Cooling System") {
+                    const fanGeo = new THREE.BoxGeometry(0.38, 0.05, 0.05);
+                    const fanMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+                    
+                    const fan1 = new THREE.Mesh(fanGeo, fanMat);
+                    fan1.position.set(0, 0.2, 0.22);
+                    utilityGroup.add(fan1);
+                    animatedParts.fans.push(fan1);
+
+                    const fan2 = new THREE.Mesh(fanGeo, fanMat);
+                    fan2.position.set(0, -0.2, 0.22);
+                    utilityGroup.add(fan2);
+                    animatedParts.fans.push(fan2);
+
+                    const pipeGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.4, 8);
+                    pipeGeo.rotateZ(Math.PI / 2);
+                    const pipeLeft = new THREE.Mesh(pipeGeo, glowingCyanMaterial);
+                    pipeLeft.position.set(-0.35, 0.1, 0.2);
+                    const pipeRight = new THREE.Mesh(pipeGeo, glowingCyanMaterial);
+                    pipeRight.position.set(0.35, 0.1, 0.2);
+                    utilityGroup.add(pipeLeft);
+                    utilityGroup.add(pipeRight);
+
+                } else if (currentUtility === "Turbo Battery") {
+                    const cellGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.55, 8);
+                    const greenGlow = new THREE.MeshBasicMaterial({ color: 0x00FF33 });
+                    
+                    const leftCell = new THREE.Mesh(cellGeo, greenGlow);
+                    leftCell.position.set(-0.16, 0, 0.12);
+                    const rightCell = new THREE.Mesh(cellGeo, greenGlow);
+                    rightCell.position.set(0.16, 0, 0.12);
+                    utilityGroup.add(leftCell);
+                    utilityGroup.add(rightCell);
+                    
+                } else if (currentUtility === "Battery Pack") {
+                    const electGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.18, 8);
+                    const leftElect = new THREE.Mesh(electGeo, goldMaterial);
+                    leftElect.position.set(-0.18, 0.52, 0);
+                    const rightElect = new THREE.Mesh(electGeo, goldMaterial);
+                    rightElect.position.set(0.18, 0.52, 0);
+                    utilityGroup.add(leftElect);
+                    utilityGroup.add(rightElect);
+
+                    const glowLight = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), glowingOrangeMaterial);
+                    glowLight.position.set(0, 0, 0.22);
+                    utilityGroup.add(glowLight);
+                    
+                } else if (currentUtility === "Object Detector" || currentUtility === "Heat Sensor") {
+                    const stalkGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.25, 8);
+                    const stalk = new THREE.Mesh(stalkGeo, darkMetalMaterial);
+                    stalk.position.set(0, 0.55, 0);
+                    utilityGroup.add(stalk);
+
+                    const dishGeo = new THREE.CylinderGeometry(0.28, 0.1, 0.08, 12);
+                    dishGeo.rotateX(Math.PI / 2);
+                    const dish = new THREE.Mesh(dishGeo, caseMat);
+                    dish.position.set(0, 0.72, 0);
+                    utilityGroup.add(dish);
+                    animatedParts.radars.push(dish);
+                }
+
+                // Define Utility Component
+                robotParts["utility"] = new RobotPart("utility", currentUtility, "AUX_UTILITY", utilityGroup);
+            }
+
+            // 6. BOTTOM BASE / MOVEMENT SYSTEM (LEGS)
+            if (currentLegs === "Heavy Tracks") {
+                const treadGeo = new THREE.BoxGeometry(0.42, 0.85, 1.5);
+                
+                const leftTread = new THREE.Mesh(treadGeo, darkMetalMaterial);
+                leftTread.position.set(-0.85, 0.42, 0);
+                leftTread.castShadow = true;
+                leftTread.receiveShadow = true;
+                
+                const rightTread = new THREE.Mesh(treadGeo, darkMetalMaterial);
+                rightTread.position.set(0.85, 0.42, 0);
+                rightTread.castShadow = true;
+                rightTread.receiveShadow = true;
+
+                const axleGeo = new THREE.BoxGeometry(1.4, 0.3, 0.5);
+                const axle = new THREE.Mesh(axleGeo, metallicMaterial);
+                axle.position.set(0, 0.65, 0);
+                axle.castShadow = true;
+
+                legsGroup.add(leftTread);
+                legsGroup.add(rightTread);
+                legsGroup.add(axle);
+
+            } else if (currentLegs === "All-Terrain Wheels") {
+                const frameGeo = new THREE.BoxGeometry(1.1, 0.2, 1.2);
+                const frame = new THREE.Mesh(frameGeo, darkMetalMaterial);
+                frame.position.set(0, 0.45, 0);
+                frame.castShadow = true;
+                legsGroup.add(frame);
+
+                const wheelGeo = new THREE.CylinderGeometry(0.42, 0.42, 0.22, 16);
+                wheelGeo.rotateZ(Math.PI / 2);
+                const tyreMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.9 });
+
+                const wheelFL = new THREE.Mesh(wheelGeo, tyreMat);
+                wheelFL.position.set(-0.65, 0.42, 0.45);
+                wheelFL.castShadow = true;
+                legsGroup.add(wheelFL);
+                animatedParts.wheels.push(wheelFL);
+
+                const wheelFR = new THREE.Mesh(wheelGeo, tyreMat);
+                wheelFR.position.set(0.65, 0.42, 0.45);
+                wheelFR.castShadow = true;
+                legsGroup.add(wheelFR);
+                animatedParts.wheels.push(wheelFR);
+
+                const wheelRL = new THREE.Mesh(wheelGeo, tyreMat);
+                wheelRL.position.set(-0.65, 0.42, -0.45);
+                wheelRL.castShadow = true;
+                legsGroup.add(wheelRL);
+                animatedParts.wheels.push(wheelRL);
+
+                const wheelRR = new THREE.Mesh(wheelGeo, tyreMat);
+                wheelRR.position.set(0.65, 0.42, -0.45);
+                wheelRR.castShadow = true;
+                legsGroup.add(wheelRR);
+                animatedParts.wheels.push(wheelRR);
+
+            } else if (currentLegs === "Hover Engine") {
+                const ringGeo = new THREE.CylinderGeometry(0.55, 0.35, 0.55, 16);
+                const engine = new THREE.Mesh(ringGeo, darkMetalMaterial);
+                engine.position.set(0, 1.1, 0);
+                engine.castShadow = true;
+                legsGroup.add(engine);
+
+                const plateGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.05, 12);
+                const repulsor = new THREE.Mesh(plateGeo, glowingCyanMaterial);
+                repulsor.position.set(0, 0.81, 0);
+                legsGroup.add(repulsor);
+
+                const thrustGeo = new THREE.ConeGeometry(0.28, 0.8, 12, 1, true);
+                thrustGeo.translate(0, -0.4, 0);
+                const thrust = new THREE.Mesh(thrustGeo, new THREE.MeshBasicMaterial({
+                    color: 0x00E5FF,
+                    transparent: true,
+                    opacity: 0.65,
+                    side: THREE.DoubleSide
+                }));
+                thrust.position.set(0, 0.8, 0);
+                legsGroup.add(thrust);
+                animatedParts.thrusters.push(thrust);
+
+            } else if (currentLegs === "Jump Springs") {
+                const mount = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.15, 0.6), darkMetalMaterial);
+                mount.position.set(0, 0.95, 0);
+                legsGroup.add(mount);
+
+                const springGroup = new THREE.Group();
+                springGroup.position.set(0, 0.5, 0);
+                legsGroup.add(springGroup);
+                animatedParts.springGroup = springGroup;
+
+                const springMat = new THREE.MeshStandardMaterial({ color: 0xdddddd, metalness: 0.9, roughness: 0.1 });
+                for (let c = 0; c < 5; c++) {
+                    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.24, 0.05, 8, 16), springMat);
+                    ring.rotation.x = Math.PI / 2 + 0.12;
+                    ring.position.y = (c * 0.12) - 0.22;
+                    springGroup.add(ring);
+                }
+
+                const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.22, 0.1, 12), darkMetalMaterial);
+                foot.position.set(0, 0.1, 0);
+                foot.castShadow = true;
+                legsGroup.add(foot);
+
+            } else if (currentLegs === "Jetpack") {
+                const jetCanisterGeo = new THREE.CylinderGeometry(0.18, 0.18, 0.85, 12);
+                
+                const leftJet = new THREE.Mesh(jetCanisterGeo, legsMat);
+                leftJet.position.set(-0.55, 1.1, -0.2);
+                leftJet.castShadow = true;
+                legsGroup.add(leftJet);
+
+                const rightJet = new THREE.Mesh(jetCanisterGeo, legsMat);
+                rightJet.position.set(0.55, 1.1, -0.2);
+                rightJet.castShadow = true;
+                legsGroup.add(rightJet);
+
+                const flameGeo = new THREE.ConeGeometry(0.14, 0.65, 8);
+                flameGeo.translate(0, -0.32, 0);
+                const flameMat = new THREE.MeshBasicMaterial({ color: 0xFF5722, transparent: true, opacity: 0.75 });
+
+                const leftFlame = new THREE.Mesh(flameGeo, flameMat);
+                leftFlame.position.set(-0.55, 0.65, -0.2);
+                legsGroup.add(leftFlame);
+                animatedParts.thrusters.push(leftFlame);
+
+                const rightFlame = new THREE.Mesh(flameGeo, flameMat);
+                rightFlame.position.set(0.55, 0.65, -0.2);
+                legsGroup.add(rightFlame);
+                animatedParts.thrusters.push(rightFlame);
+
+            } else {
+                const hip = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.25, 0.4), darkMetalMaterial);
+                hip.position.set(0, 0.9, 0);
+                legsGroup.add(hip);
+
+                const legLeft = new THREE.Group();
+                legLeft.position.set(-0.32, 0.8, 0);
+                animatedParts.leftBipedLeg = legLeft;
+                
+                const thighL = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.06, 0.45, 8), legsMat);
+                thighL.position.y = -0.2;
+                thighL.castShadow = true;
+                legLeft.add(thighL);
+                
+                const footL = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.1, 0.3), darkMetalMaterial);
+                footL.position.set(0, -0.45, 0.05);
+                footL.castShadow = true;
+                legLeft.add(footL);
+                legsGroup.add(legLeft);
+
+                const legRight = new THREE.Group();
+                legRight.position.set(0.32, 0.8, 0);
+                animatedParts.rightBipedLeg = legRight;
+                
+                const thighR = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.06, 0.45, 8), legsMat);
+                thighR.position.y = -0.2;
+                thighR.castShadow = true;
+                legRight.add(thighR);
+                
+                const footR = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.1, 0.3), darkMetalMaterial);
+                footR.position.set(0, -0.45, 0.05);
+                footR.castShadow = true;
+                legRight.add(footR);
+                legsGroup.add(legRight);
+            }
+
+            // Define Legs Component
+            robotParts["legs"] = new RobotPart("legs", currentLegs, "MOBILITY_SYSTEM", legsGroup);
+
+            // Re-apply selection helper on the rebuilt part to ensure perfectly uninterrupted display
+            if (selectedPartId && robotParts[selectedPartId]) {
+                selectPart(selectedPartId);
+            }
+        }
+
+        function buildArm(parentGroup, isLeft, type, paintColor, metallicMat, darkMetalMat, goldMat, glowingCyanMat, glowingOrangeMat) {
+            const sideSign = isLeft ? -1 : 1;
+            const armRoot = new THREE.Group();
+            armRoot.position.set(sideSign * 0.98, 0.4, 0);
+            parentGroup.add(armRoot);
+
+            const shoulderJoint = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 12), darkMetalMat);
+            armRoot.add(shoulderJoint);
+
+            const limbGeo = new THREE.CylinderGeometry(0.08, 0.07, 0.5, 8);
+            const upperArm = new THREE.Mesh(limbGeo, metallicMat);
+            upperArm.position.set(sideSign * 0.18, -0.25, 0);
+            upperArm.rotation.z = -sideSign * 0.25;
+            upperArm.castShadow = true;
+            armRoot.add(upperArm);
+
+            const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), darkMetalMat);
+            elbow.position.set(sideSign * 0.28, -0.5, 0);
+            armRoot.add(elbow);
+
+            const foreArm = new THREE.Mesh(limbGeo, metallicMat);
+            foreArm.position.set(sideSign * 0.38, -0.75, 0);
+            foreArm.rotation.z = -sideSign * 0.12;
+            foreArm.castShadow = true;
+            armRoot.add(foreArm);
+
+            const toolPos = new THREE.Vector3(sideSign * 0.45, -1.0, 0.05);
+
+            if (type === "Claw Arm") {
+                const clawRoot = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.15, 0.18), darkMetalMat);
+                clawRoot.position.copy(toolPos);
+                armRoot.add(clawRoot);
+
+                const clawMat = new THREE.MeshStandardMaterial({ color: 0x9e9e9e, metalness: 0.8, roughness: 0.2 });
+                const pincerGeo = new THREE.TorusGeometry(0.14, 0.04, 6, 12, Math.PI);
+                
+                const leftPincer = new THREE.Mesh(pincerGeo, clawMat);
+                leftPincer.position.set(toolPos.x + sideSign * 0.05, toolPos.y - 0.12, toolPos.z);
+                leftPincer.rotation.z = Math.PI / 2;
+                armRoot.add(leftPincer);
+
+                const rightPincer = new THREE.Mesh(pincerGeo, clawMat);
+                rightPincer.position.set(toolPos.x - sideSign * 0.05, toolPos.y - 0.12, toolPos.z);
+                rightPincer.rotation.z = -Math.PI / 2;
+                armRoot.add(rightPincer);
+
+                animatedParts.claws.push({ left: leftPincer, right: rightPincer, sideSign: sideSign });
+
+            } else if (type === "Laser Blaster") {
+                const barrelGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.45, 12);
+                barrelGeo.rotateX(Math.PI / 2);
+                const barrel = new THREE.Mesh(barrelGeo, darkMetalMat);
+                barrel.position.copy(toolPos);
+                barrel.castShadow = true;
+                armRoot.add(barrel);
+
+                const ringGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.05, 12);
+                ringGeo.rotateX(Math.PI / 2);
+                const ring = new THREE.Mesh(ringGeo, goldMat);
+                ring.position.set(toolPos.x, toolPos.y, toolPos.z + 0.05);
+                armRoot.add(ring);
+
+                const flashGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.08, 12);
+                flashGeo.rotateX(Math.PI / 2);
+                const flash = new THREE.Mesh(flashGeo, glowingCyanMat);
+                flash.position.set(toolPos.x, toolPos.y, toolPos.z + 0.22);
+                armRoot.add(flash);
+
+            } else if (type === "Drill Arm") {
+                const drillHolder = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.15, 12), darkMetalMat);
+                drillHolder.position.copy(toolPos);
+                armRoot.add(drillHolder);
+
+                const drillGeo = new THREE.ConeGeometry(0.18, 0.55, 12);
+                drillGeo.rotateX(Math.PI / 2);
+                const drill = new THREE.Mesh(drillGeo, goldMat);
+                drill.position.set(toolPos.x, toolPos.y - 0.15, toolPos.z);
+                armRoot.add(drill);
+                animatedParts.drills.push(drill);
+
+            } else if (type === "Plasma Cannon") {
+                const baseGeo = new THREE.BoxGeometry(0.24, 0.18, 0.35);
+                const canonBase = new THREE.Mesh(baseGeo, darkMetalMat);
+                canonBase.position.copy(toolPos);
+                armRoot.add(canonBase);
+
+                const barrelGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.4, 8);
+                barrelGeo.rotateX(Math.PI / 2);
+                
+                const b1 = new THREE.Mesh(barrelGeo, metallicMat);
+                b1.position.set(toolPos.x - 0.07, toolPos.y, toolPos.z + 0.15);
+                b1.castShadow = true;
+                const b2 = new THREE.Mesh(barrelGeo, metallicMat);
+                b2.position.set(toolPos.x + 0.07, toolPos.y, toolPos.z + 0.15);
+                b2.castShadow = true;
+                
+                const tipGeo = new THREE.SphereGeometry(0.04, 6, 6);
+                const muzzleGlow = new THREE.MeshBasicMaterial({ color: 0xFF2255 });
+                const m1 = new THREE.Mesh(tipGeo, muzzleGlow);
+                m1.position.set(toolPos.x - 0.07, toolPos.y, toolPos.z + 0.33);
+                const m2 = new THREE.Mesh(tipGeo, muzzleGlow);
+                m2.position.set(toolPos.x + 0.07, toolPos.y, toolPos.z + 0.33);
+
+                armRoot.add(b1);
+                armRoot.add(b2);
+                armRoot.add(m1);
+                armRoot.add(m2);
+
+            } else if (type === "Shield Arm") {
+                const shieldEmitter = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.14, 0.12, 12), goldMat);
+                shieldEmitter.position.copy(toolPos);
+                armRoot.add(shieldEmitter);
+
+                const shieldDiscGeo = new THREE.CylinderGeometry(0.68, 0.68, 0.02, 24);
+                shieldDiscGeo.rotateX(Math.PI / 2);
+                const shieldDisc = new THREE.Mesh(shieldDiscGeo, new THREE.MeshBasicMaterial({
+                    color: 0x3D5AFE,
+                    transparent: true,
+                    opacity: 0.45,
+                    side: THREE.DoubleSide
+                }));
+                shieldDisc.position.set(toolPos.x + sideSign * 0.05, toolPos.y - 0.05, toolPos.z);
+                armRoot.add(shieldDisc);
+
+                const ringGeo = new THREE.TorusGeometry(0.67, 0.02, 6, 24);
+                const ring = new THREE.Mesh(ringGeo, glowingCyanMat);
+                ring.position.set(toolPos.x + sideSign * 0.05, toolPos.y - 0.05, toolPos.z);
+                armRoot.add(ring);
+
+            } else {
+                const wrist = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 0.1, 8), darkMetalMat);
+                wrist.position.copy(toolPos);
+                armRoot.add(wrist);
+
+                const fist = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), metallicMat);
+                fist.position.set(toolPos.x, toolPos.y - 0.08, toolPos.z);
+                armRoot.add(fist);
+            }
+        }
+
+        // --- ANIMATE / RENDER LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const time = Date.now() * 0.001;
+
+            if (isAnimationPlaying) {
+                // 1. Slow, natural idle float / breathing motion
+                const breatheRoot = scene.getObjectByName("BreathingRoot");
+                if (breatheRoot) {
+                    if (currentAnimation === "Idle Float" || currentAnimation === "Radar Scan") {
+                        breatheRoot.position.y = Math.sin(time * 2.2) * 0.02;
+                        breatheRoot.rotation.z = Math.sin(time * 1.5) * 0.005;
+                        breatheRoot.rotation.x = Math.sin(time * 1.1) * 0.003;
+                    } else if (currentAnimation === "Disco Party") {
+                        breatheRoot.position.y = Math.sin(time * 6) * 0.05;
+                        breatheRoot.rotation.z = Math.sin(time * 4) * 0.02;
+                    } else {
+                        // Standard breathing fallback
+                        breatheRoot.position.y = Math.sin(time * 2.2) * 0.0015;
+                    }
+                }
+
+                // 2. Rotate drills
+                animatedParts.drills.forEach(drill => {
+                    const speed = currentAnimation === "Weapon Test" ? 0.8 : 0.28;
+                    drill.rotation.y += speed;
+                });
+
+                // 3. Spin cooling system fans
+                animatedParts.fans.forEach(fan => {
+                    fan.rotation.y += 0.18;
+                });
+
+                // 4. Spin Object Detector/Radar dishes
+                animatedParts.radars.forEach(radar => {
+                    radar.rotation.y += 0.03;
+                });
+
+                // 5. Pulsing hover repulsor exhaust glow and jet engines
+                animatedParts.thrusters.forEach(thruster => {
+                    const speedMultiplier = currentAnimation === "Walk Cycle" ? 2.0 : 1.0;
+                    const pulse = 0.95 + Math.sin(time * 45 * speedMultiplier) * 0.12;
+                    thruster.scale.set(pulse, pulse, pulse);
+                });
+
+                // 6. Custom Arm / Weapon Testing Animation
+                if (currentAnimation === "Weapon Test") {
+                    if (animatedParts.leftArmGroup) {
+                        animatedParts.leftArmGroup.rotation.x = -Math.PI / 3 + Math.sin(time * 8) * 0.15;
+                    }
+                    if (animatedParts.rightArmGroup) {
+                        animatedParts.rightArmGroup.rotation.x = -Math.PI / 3 + Math.sin(time * 9) * 0.15;
+                    }
+                    // Snap claw pincers if present
+                    animatedParts.claws.forEach(claw => {
+                        const angle = Math.sin(time * 12) * 0.4;
+                        claw.left.rotation.z = Math.PI / 2 + angle;
+                        claw.right.rotation.z = -Math.PI / 2 - angle;
+                    });
+                } else {
+                    // Reset arm positions
+                    if (animatedParts.leftArmGroup) {
+                        animatedParts.leftArmGroup.rotation.x = 0;
+                    }
+                    if (animatedParts.rightArmGroup) {
+                        animatedParts.rightArmGroup.rotation.x = 0;
+                    }
+                    // Reset claw pincers
+                    animatedParts.claws.forEach(claw => {
+                        claw.left.rotation.z = Math.PI / 2;
+                        claw.right.rotation.z = -Math.PI / 2;
+                    });
+                }
+
+                // 7. Custom Walk Cycle Animation
+                if (currentAnimation === "Walk Cycle") {
+                    // Biped legs swinging
+                    if (animatedParts.leftBipedLeg) {
+                        animatedParts.leftBipedLeg.rotation.x = Math.sin(time * 7) * 0.5;
+                    }
+                    if (animatedParts.rightBipedLeg) {
+                        animatedParts.rightBipedLeg.rotation.x = -Math.sin(time * 7) * 0.5;
+                    }
+                    // Spring leg compressing/bouncing
+                    if (animatedParts.springGroup) {
+                        animatedParts.springGroup.scale.y = 1.0 + Math.sin(time * 14) * 0.3;
+                    }
+                    // Rotate wheels faster
+                    animatedParts.wheels.forEach(wheel => {
+                        wheel.rotation.x += 0.25;
+                    });
+                } else {
+                    // Reset walk cycle
+                    if (animatedParts.leftBipedLeg) {
+                        animatedParts.leftBipedLeg.rotation.x = 0;
+                    }
+                    if (animatedParts.rightBipedLeg) {
+                        animatedParts.rightBipedLeg.rotation.x = 0;
+                    }
+                    if (animatedParts.springGroup) {
+                        animatedParts.springGroup.scale.y = 1.0;
+                    }
+                }
+
+                // 8. Radar Scan Head Sweeping
+                const headNode = robotParts["head"] ? robotParts["head"].group : null;
+                if (headNode) {
+                    if (currentAnimation === "Radar Scan") {
+                        headNode.rotation.y = Math.sin(time * 2.0) * 0.6;
+                    } else {
+                        headNode.rotation.y = 0;
+                    }
+                }
+
+                // 9. Disco Party Animation
+                if (currentAnimation === "Disco Party") {
+                    robotGroup.rotation.y = time * 1.5;
+                    // Flash any Neon Grid material if selected
+                    scene.traverse(child => {
+                        if (child.isMesh && child.material && child.material.emissive) {
+                            child.material.emissive.setHSL((time * 0.5) % 1.0, 1.0, 0.5);
+                        }
+                    });
+                } else {
+                    robotGroup.rotation.y = 0;
+                }
+            }
+
+            // 10. Update neon selection box location/bounds to follow breathing animations seamlessly
+            if (selectionBoxHelper) {
+                selectionBoxHelper.update();
+            }
+
+            // 11. Ambient Floating Cyber Particles update
+            if (particlesGroup && particlesGroup.userData && particlesGroup.userData.geo) {
+                const points = particlesGroup.children[0];
+                const posArr = points.geometry.attributes.position.array;
+                const pData = particlesGroup.userData.data;
+
+                for (let i = 0; i < particleCount; i++) {
+                    const data = pData[i];
+                    // Floating upwards
+                    posArr[i * 3 + 1] += data.speedY;
+                    
+                    // Orbiting around center
+                    data.angle += data.angleSpeed;
+                    posArr[i * 3] = Math.cos(data.angle) * data.radius;
+                    posArr[i * 3 + 2] = Math.sin(data.angle) * data.radius;
+
+                    // Reset when reaching top boundary
+                    if (posArr[i * 3 + 1] > 6.0) {
+                        posArr[i * 3 + 1] = 0;
+                    }
+                }
+                points.geometry.attributes.position.needsUpdate = true;
+                
+                // Dynamically morph particle colors to match current paint color
+                if (points.material) {
+                    points.material.color.lerp(new THREE.Color(currentPaint), 0.05);
+                }
+            }
+
+            // Update space starfield drift
+            if (scene.userData.starField) {
+                const starPoints = scene.userData.starField;
+                const starPositions = starPoints.geometry.attributes.position.array;
+                const starSpeeds = scene.userData.starSpeeds;
+                const count = scene.userData.starCount;
+
+                for (let i = 0; i < count; i++) {
+                    starPositions[i * 3] += starSpeeds[i].x;
+                    starPositions[i * 3 + 1] += starSpeeds[i].y;
+                    starPositions[i * 3 + 2] += starSpeeds[i].z;
+
+                    // If a star gets too far left, wrap it back to the right
+                    if (starPositions[i * 3] < -25) {
+                        starPositions[i * 3] = 25;
+                        starPositions[i * 3 + 1] = Math.random() * 20 - 5;
+                        starPositions[i * 3 + 2] = (Math.random() - 0.5) * 50;
+                    }
+                }
+                starPoints.geometry.attributes.position.needsUpdate = true;
+            }
+
+            // Update camera & controls
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // --- EXPOSED INTERFACE FOR ANDROID WEBVIEW CALLS ---
+        window.updateRobot = function(
+            paintColor, eyesType, hatType, legs, leftArm, rightArm, utility,
+            headStyle, headMaterial, torsoStyle, torsoMaterial,
+            armsStyle, armsMaterial, legsStyle, legsMaterial,
+            activeAnimation, isAnimating
+        ) {
+            currentPaint = paintColor || "#3D5AFE";
+            currentEyes = eyesType || "digital";
+            currentHat = hatType || "none";
+            currentLegs = legs || "Standard Legs";
+            currentLeftArm = leftArm || "Standard Arm";
+            currentRightArm = rightArm || "Standard Arm";
+            currentUtility = utility || "Empty";
+
+            currentHeadStyle = headStyle || "Standard Dome";
+            currentHeadMaterial = headMaterial || "Chrome Metal";
+            currentTorsoStyle = torsoStyle || "Fusion Frame";
+            currentTorsoMaterial = torsoMaterial || "Chrome Metal";
+            currentArmsStyle = armsStyle || "Standard Claw";
+            currentArmsMaterial = armsMaterial || "Chrome Metal";
+            currentLegsStyle = legsStyle || "Standard Biped";
+            currentLegsMaterial = legsMaterial || "Chrome Metal";
+            currentAnimation = activeAnimation || "Idle Float";
+            isAnimationPlaying = (isAnimating !== undefined && isAnimating !== null) ? (String(isAnimating) === "true" || isAnimating === true) : true;
+
+            // Rebuild the 3D model immediately with updated configurations
+            rebuildRobot();
+        };
+    </script>
+</body>
+</html>

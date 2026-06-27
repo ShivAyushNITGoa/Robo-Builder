@@ -1,0 +1,1031 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>3D Space Assembly Sandbox</title>
+    <style>
+        body, html {
+            margin: 0; padding: 0; overflow: hidden; width: 100%; height: 100%;
+            background-color: #05070f;
+            font-family: monospace;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+        #canvas3d { width: 100%; height: 100%; display: block; }
+        
+        /* Premium Floating CyberHUD Overlay */
+        #cyber-hud {
+            position: absolute;
+            top: 12px;
+            left: 12px;
+            color: #00F0FF;
+            pointer-events: none;
+            text-shadow: 0 0 5px rgba(0, 240, 255, 0.6);
+            background: rgba(7, 10, 22, 0.75);
+            border: 1px solid rgba(0, 240, 255, 0.3);
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 11px;
+            line-height: 1.4;
+            max-width: 280px;
+            box-shadow: 0 0 10px rgba(0, 240, 255, 0.15);
+            z-index: 10;
+        }
+        .hud-row { display: flex; justify-content: space-between; margin: 2px 0; }
+        .hud-label { color: #5275a1; font-weight: bold; margin-right: 8px; }
+        .hud-value { color: #ffffff; font-weight: bold; }
+        .hud-title { 
+            color: #FF007F; 
+            font-weight: 900; 
+            font-size: 12px; 
+            border-bottom: 1px dashed rgba(255, 0, 127, 0.4); 
+            padding-bottom: 4px; 
+            margin-bottom: 6px;
+            text-shadow: 0 0 4px rgba(255,0,127,0.5);
+        }
+
+        /* Camera Preset Selector Buttons overlay */
+        #camera-controls {
+            position: absolute;
+            bottom: 12px;
+            left: 12px;
+            display: flex;
+            gap: 6px;
+            z-index: 10;
+        }
+        .cam-btn {
+            background: rgba(12, 17, 36, 0.85);
+            border: 1px solid #3D5AFE;
+            border-radius: 4px;
+            color: #ffffff;
+            font-family: monospace;
+            font-size: 9px;
+            padding: 5px 8px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-transform: uppercase;
+        }
+        .cam-btn:hover, .cam-btn.active {
+            background: #3D5AFE;
+            border-color: #00F0FF;
+            box-shadow: 0 0 8px rgba(0, 240, 255, 0.4);
+        }
+
+        /* Interactive scanner diagnostics */
+        #scanning-indicator {
+            position: absolute;
+            top: 12px;
+            right: 12px;
+            background: rgba(7, 10, 22, 0.8);
+            border: 1.5px solid #FF007F;
+            border-radius: 4px;
+            color: #FF007F;
+            font-size: 9px;
+            font-weight: bold;
+            padding: 4px 8px;
+            letter-spacing: 1.5px;
+            animation: blink 1.2s infinite alternate;
+            z-index: 10;
+            display: none;
+        }
+        @keyframes blink {
+            0% { opacity: 0.3; }
+            100% { opacity: 1; text-shadow: 0 0 6px #FF007F; }
+        }
+    </style>
+    <!-- Load Three.js safely from reliable CDNs -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+</head>
+<body>
+    <!-- Real-time HUD system -->
+    <div id="cyber-hud">
+        <div class="hud-title">ROBO SIMULATOR 3D</div>
+        <div class="hud-row"><span class="hud-label">CHASSIS:</span> <span class="hud-value" id="hud-chassis">Awaiting Config</span></div>
+        <div class="hud-row"><span class="hud-label">MOBILITY:</span> <span class="hud-value" id="hud-mobility">Awaiting Config</span></div>
+        <div class="hud-row"><span class="hud-label">WEAPON L:</span> <span class="hud-value" id="hud-left-arm">Standard</span></div>
+        <div class="hud-row"><span class="hud-label">WEAPON R:</span> <span class="hud-value" id="hud-right-arm">Standard</span></div>
+        <div class="hud-row"><span class="hud-label">UTILITY:</span> <span class="hud-value" id="hud-utility">Empty</span></div>
+        <div class="hud-row"><span class="hud-label">SECTOR PROGRESS:</span> <span class="hud-value" id="hud-progress">0.0%</span></div>
+        <div class="hud-row"><span class="hud-label">SIM STATUS:</span> <span class="hud-value" id="hud-status" style="color: #FFC107;">STANDBY</span></div>
+    </div>
+
+    <!-- Camera selectors -->
+    <div id="camera-controls">
+        <button class="cam-btn active" onclick="setCameraMode('chase')">CHASE CAM</button>
+        <button class="cam-btn" onclick="setCameraMode('orbit')">ORBIT FREE</button>
+        <button class="cam-btn" onclick="setCameraMode('cockpit')">COCKPIT</button>
+        <button class="cam-btn" onclick="setCameraMode('side')">SIDE VIEW</button>
+    </div>
+
+    <div id="scanning-indicator">SCANNING ACTIVE // WEAPONS HOT</div>
+    <div id="canvas3d"></div>
+
+    <script>
+        // Core WebGL framework variables
+        let scene, camera, renderer, starfield;
+        let robotGroup, breathingRoot;
+        let obstaclesGroup = [];
+        let particles = [];
+        let cameraMode = 'chase'; // chase, orbit, cockpit, side
+        let orbitAngleX = 0, orbitAngleY = 0.3, orbitDist = 18;
+        let isDragging = false, previousMousePosition = { x: 0, y: 0 };
+
+        // Configuration tracking state
+        let currentConfig = {
+            paint: "3D5AFE",
+            eyes: "digital",
+            hat: "none",
+            legs: "Standard Legs",
+            leftArm: "Standard Arm",
+            rightArm: "Standard Arm",
+            utility: "Empty",
+            hazard: "none",
+            progress: 0.0,
+            status: "idle",
+            posX: 0.0, posY: 0.0, posZ: 0.0, speed: 1.0
+        };
+
+        // Material cache helper
+        let cachedMaterials = {};
+
+        // Animation timers
+        let lastTime = performance.now();
+        let runningTimers = {
+            drillRot: 0,
+            fanRot: 0,
+            radarRot: 0,
+            treadOffset: 0,
+            glowIntensity: 0
+        };
+
+        // Initialize Three Scene
+        function init() {
+            scene = new THREE.Scene();
+            scene.background = new THREE.Color(0x05070f);
+            scene.fog = new THREE.FogExp2(0x05070f, 0.015);
+
+            camera = new THREE.PerspectiveCamera(55, window.innerWidth / window.innerHeight, 0.1, 1000);
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, powerPreference: "high-performance" });
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+            renderer.shadowMap.enabled = true;
+            document.getElementById('canvas3d').appendChild(renderer.domElement);
+
+            // Setup professional lighting
+            const ambientLight = new THREE.AmbientLight(0x181f38, 1.5);
+            scene.add(ambientLight);
+
+            const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
+            dirLight.position.set(40, 100, 50);
+            dirLight.castShadow = true;
+            dirLight.shadow.mapSize.width = 1024;
+            dirLight.shadow.mapSize.height = 1024;
+            scene.add(dirLight);
+
+            // Side color edge lights (Cyberpunk neon blue / hot magenta side accents)
+            const edgeBlue = new THREE.DirectionalLight(0x00f0ff, 1.8);
+            edgeBlue.position.set(-50, 20, -10);
+            scene.add(edgeBlue);
+
+            const edgeMagenta = new THREE.DirectionalLight(0xff007f, 1.5);
+            edgeMagenta.position.set(50, 20, 10);
+            scene.add(edgeMagenta);
+
+            // Construct space-age highway (runs from Z = 300 to Z = -300)
+            buildHighway();
+
+            // Construct starry background
+            buildStarfield();
+
+            // Setup main Robot grouping
+            robotGroup = new THREE.Group();
+            scene.add(robotGroup);
+
+            // Set up basic dragging controls
+            setupPointerEvents();
+
+            // Trigger window resize helper
+            window.addEventListener('resize', onWindowResize);
+
+            // Initial camera placement
+            updateCamera(0.016);
+        }
+
+        // Space highway construction with modular sectors
+        function buildHighway() {
+            const pathGroup = new THREE.Group();
+            scene.add(pathGroup);
+
+            // Neon highway runway bed
+            const highwayGeo = new THREE.PlaneGeometry(16, 600);
+            const highwayMat = new THREE.MeshStandardMaterial({
+                color: 0x101524,
+                roughness: 0.8,
+                metalness: 0.3
+            });
+            const highway = new THREE.Mesh(highwayGeo, highwayMat);
+            highway.rotation.x = -Math.PI / 2;
+            highway.position.y = 0;
+            highway.receiveShadow = true;
+            pathGroup.add(highway);
+
+            // Glowing boundary lines
+            const lineGeo = new THREE.BoxGeometry(0.15, 0.05, 600);
+            const leftMat = new THREE.MeshBasicMaterial({ color: 0x00f0ff });
+            const rightMat = new THREE.MeshBasicMaterial({ color: 0xff007f });
+
+            const leftLine = new THREE.Mesh(lineGeo, leftMat);
+            leftLine.position.set(-8, 0.03, 0);
+            const rightLine = new THREE.Mesh(lineGeo, rightMat);
+            rightLine.position.set(8, 0.03, 0);
+
+            pathGroup.add(leftLine);
+            pathGroup.add(rightLine);
+
+            // Standard highway segments dashes
+            const dashGeo = new THREE.BoxGeometry(0.1, 0.01, 8);
+            const dashMat = new THREE.MeshBasicMaterial({ color: 0x5075a1 });
+            for(let z = -280; z <= 280; z += 24) {
+                const dashLeft = new THREE.Mesh(dashGeo, dashMat);
+                dashLeft.position.set(-4, 0.02, z);
+                const dashRight = new THREE.Mesh(dashGeo, dashMat);
+                dashRight.position.set(4, 0.02, z);
+                pathGroup.add(dashLeft);
+                pathGroup.add(dashRight);
+            }
+
+            // Start launch portal structure (Z = 220)
+            buildPortal(-8, 8, 220, 0x00f0ff);
+
+            // End arrival docking receiver portal (Z = -220)
+            buildPortal(-8, 8, -220, 0xff007f);
+        }
+
+        // Auxiliary glowing arch portals
+        function buildPortal(lx, rx, z, glowHex) {
+            const archGroup = new THREE.Group();
+            archGroup.position.set(0, 0, z);
+            scene.add(archGroup);
+
+            const columnGeo = new THREE.BoxGeometry(1, 10, 1);
+            const colMat = new THREE.MeshStandardMaterial({ color: 0x222633, roughness: 0.4, metalness: 0.95 });
+            
+            const colL = new THREE.Mesh(columnGeo, colMat);
+            colL.position.set(lx - 0.5, 5, 0);
+            const colR = new THREE.Mesh(columnGeo, colMat);
+            colR.position.set(rx + 0.5, 5, 0);
+            archGroup.add(colL);
+            archGroup.add(colR);
+
+            const beamGeo = new THREE.BoxGeometry(rx - lx + 3, 1, 1);
+            const beam = new THREE.Mesh(beamGeo, colMat);
+            beam.position.set(0, 10.5, 0);
+            archGroup.add(beam);
+
+            // Neon glowing arch lining
+            const glowMat = new THREE.MeshBasicMaterial({ color: glowHex });
+            const glowL = new THREE.Mesh(new THREE.BoxGeometry(0.2, 9.8, 1.1), glowMat);
+            glowL.position.set(lx, 5, 0);
+            const glowR = new THREE.Mesh(new THREE.BoxGeometry(0.2, 9.8, 1.1), glowMat);
+            glowR.position.set(rx, 5, 0);
+            const glowT = new THREE.Mesh(new THREE.BoxGeometry(rx - lx + 0.2, 0.2, 1.1), glowMat);
+            glowT.position.set(0, 9.9, 0);
+
+            archGroup.add(glowL);
+            archGroup.add(glowR);
+            archGroup.add(glowT);
+        }
+
+        // Multi-layered scrolling stars
+        function buildStarfield() {
+            const starsGeom = new THREE.BufferGeometry();
+            const starsCount = 1000;
+            const starsPos = new Float32Array(starsCount * 3);
+            for(let i=0; i<starsCount*3; i++) {
+                starsPos[i] = (Math.random() - 0.5) * 800;
+            }
+            starsGeom.setAttribute('position', new THREE.BufferAttribute(starsPos, 3));
+            const starsMaterial = new THREE.PointsMaterial({ color: 0xffffff, size: 1.2, sizeAttenuation: true, transparent: true, opacity: 0.8 });
+            starfield = new THREE.Points(starsGeom, starsMaterial);
+            scene.add(starfield);
+        }
+
+        // Pointer event dragging for free camera rotation
+        function setupPointerEvents() {
+            const canvasElement = document.getElementById('canvas3d');
+            
+            canvasElement.addEventListener('mousedown', (e) => {
+                isDragging = true;
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            canvasElement.addEventListener('mousemove', (e) => {
+                if (!isDragging || cameraMode !== 'orbit') return;
+                const deltaMove = {
+                    x: e.clientX - previousMousePosition.x,
+                    y: e.clientY - previousMousePosition.y
+                };
+
+                orbitAngleX -= deltaMove.x * 0.007;
+                orbitAngleY = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, orbitAngleY - deltaMove.y * 0.007));
+
+                previousMousePosition = { x: e.clientX, y: e.clientY };
+            });
+
+            window.addEventListener('mouseup', () => { isDragging = false; });
+
+            // Touch support
+            canvasElement.addEventListener('touchstart', (e) => {
+                if (e.touches.length === 1) {
+                    isDragging = true;
+                    previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+                }
+            }, { passive: true });
+
+            canvasElement.addEventListener('touchmove', (e) => {
+                if (!isDragging || cameraMode !== 'orbit' || e.touches.length !== 1) return;
+                const deltaMove = {
+                    x: e.touches[0].clientX - previousMousePosition.x,
+                    y: e.touches[0].clientY - previousMousePosition.y
+                };
+
+                orbitAngleX -= deltaMove.x * 0.007;
+                orbitAngleY = Math.max(0.05, Math.min(Math.PI / 2 - 0.05, orbitAngleY - deltaMove.y * 0.007));
+
+                previousMousePosition = { x: e.touches[0].clientX, y: e.touches[0].clientY };
+            }, { passive: true });
+
+            canvasElement.addEventListener('touchend', () => { isDragging = false; });
+        }
+
+        function setCameraMode(mode) {
+            cameraMode = mode;
+            document.querySelectorAll('.cam-btn').forEach(btn => btn.classList.remove('active'));
+            // Find active button
+            event.target.classList.add('active');
+        }
+
+        function onWindowResize() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        }
+
+        // --- DYNAMIC PARTS BUILDER SYSTEM ---
+        function createOutlinedMesh(geometry, material) {
+            const mesh = new THREE.Mesh(geometry, material);
+            mesh.castShadow = true;
+            mesh.receiveShadow = true;
+
+            const outlineMat = new THREE.MeshBasicMaterial({ color: 0x070a13, side: THREE.BackSide });
+            const outlineMesh = new THREE.Mesh(geometry, outlineMat);
+            outlineMesh.scale.set(1.08, 1.08, 1.08);
+            mesh.add(outlineMesh);
+            return mesh;
+        }
+
+        function getPaintMaterial(hexString) {
+            const key = hexString;
+            if (cachedMaterials[key]) return cachedMaterials[key];
+
+            const colorInt = parseInt("0x" + hexString);
+            const mat = new THREE.MeshStandardMaterial({
+                color: colorInt,
+                roughness: 0.25,
+                metalness: 0.85
+            });
+            cachedMaterials[key] = mat;
+            return mat;
+        }
+
+        function rebuildRobotMesh() {
+            // Remove previous models
+            while (robotGroup.children.length > 0) {
+                robotGroup.remove(robotGroup.children[0]);
+            }
+
+            // Create breathing root node
+            breathingRoot = new THREE.Group();
+            robotGroup.add(breathingRoot);
+
+            const paintMat = getPaintMaterial(currentConfig.paint);
+            const darkMetalMat = new THREE.MeshStandardMaterial({ color: 0x1d2230, roughness: 0.4, metalness: 0.9 });
+            const glowingCyanMat = new THREE.MeshBasicMaterial({ color: 0x00F0FF });
+            const glowingOrangeMat = new THREE.MeshBasicMaterial({ color: 0xFF5722 });
+            const goldMat = new THREE.MeshStandardMaterial({ color: 0xFFC107, roughness: 0.15, metalness: 0.9 });
+
+            // Apply base height based on legs
+            let heightOffset = 1.6;
+            if (currentConfig.legs === "Hover Engine") heightOffset = 2.0;
+            if (currentConfig.legs === "Jetpack") heightOffset = 1.8;
+            
+            breathingRoot.position.y = heightOffset;
+
+            // 1. Core Chassis
+            const bodyGeo = new THREE.BoxGeometry(1.2, 1.4, 0.9);
+            const chassis = createOutlinedMesh(bodyGeo, paintMat);
+            breathingRoot.add(chassis);
+
+            // Chest reactor core
+            const reactor = createOutlinedMesh(new THREE.CylinderGeometry(0.3, 0.3, 0.15, 16), glowingCyanMat);
+            reactor.rotation.x = Math.PI / 2;
+            reactor.position.set(0, 0.15, 0.45);
+            breathingRoot.add(reactor);
+
+            // 2. Head Unit
+            const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.18, 0.18, 0.2, 12), darkMetalMat);
+            neck.position.set(0, 0.8, 0);
+            breathingRoot.add(neck);
+
+            const headGeo = new THREE.BoxGeometry(0.75, 0.65, 0.7);
+            const head = createOutlinedMesh(headGeo, paintMat);
+            head.position.set(0, 1.15, 0);
+            breathingRoot.add(head);
+
+            // Visor / Eyes
+            if (currentConfig.eyes === "retro") {
+                const lensGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.15, 12);
+                lensGeo.rotateX(Math.PI / 2);
+                const l1 = createOutlinedMesh(lensGeo, darkMetalMat);
+                l1.position.set(-0.18, 1.15, 0.35);
+                const l1Glass = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), glowingCyanMat);
+                l1Glass.position.set(-0.18, 1.15, 0.43);
+
+                const l2 = createOutlinedMesh(lensGeo, darkMetalMat);
+                l2.position.set(0.18, 1.15, 0.35);
+                const l2Glass = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), glowingCyanMat);
+                l2Glass.position.set(0.18, 1.15, 0.43);
+
+                breathingRoot.add(l1);
+                breathingRoot.add(l1Glass);
+                breathingRoot.add(l2);
+                breathingRoot.add(l2Glass);
+            } else if (currentConfig.eyes === "laser") {
+                const visor = createOutlinedMesh(new THREE.BoxGeometry(0.5, 0.15, 0.05), glowingOrangeMat);
+                visor.position.set(0, 1.18, 0.35);
+                breathingRoot.add(visor);
+            } else { // digital, glass
+                const eye = createOutlinedMesh(new THREE.BoxGeometry(0.48, 0.08, 0.05), glowingCyanMat);
+                eye.position.set(0, 1.18, 0.35);
+                breathingRoot.add(eye);
+            }
+
+            // 3. Aux Hats
+            if (currentConfig.hat === "builder") {
+                const helmet = new THREE.Mesh(new THREE.SphereGeometry(0.46, 16, 16, 0, Math.PI * 2, 0, Math.PI / 2), goldMat);
+                helmet.position.set(0, 1.35, 0);
+                const brim = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.04, 1.0), goldMat);
+                brim.position.set(0, 1.35, 0.05);
+                breathingRoot.add(helmet);
+                breathingRoot.add(brim);
+            } else if (currentConfig.hat === "top_hat") {
+                const topHat = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 0.5, 16), darkMetalMat);
+                topHat.position.set(0, 1.6, 0);
+                const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 0.03, 16), darkMetalMat);
+                brim.position.set(0, 1.37, 0);
+                breathingRoot.add(topHat);
+                breathingRoot.add(brim);
+            } else if (currentConfig.hat === "antenna") {
+                const antenna = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.4, 8), darkMetalMat);
+                antenna.position.set(0, 1.55, 0);
+                const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), glowingOrangeMat);
+                tip.position.set(0, 1.77, 0);
+                breathingRoot.add(antenna);
+                breathingRoot.add(tip);
+            }
+
+            // 4. Arm Attachments (Left & Right)
+            buildModularArm(true, currentConfig.leftArm, paintMat, darkMetalMat, goldMat, glowingCyanMat, glowingOrangeMat);
+            buildModularArm(false, currentConfig.rightArm, paintMat, darkMetalMat, goldMat, glowingCyanMat, glowingOrangeMat);
+
+            // 5. Utility backpack slot
+            if (currentConfig.utility !== "Empty") {
+                const packColor = currentConfig.utility.includes("Cooling") ? 0x00E5FF : 
+                                  currentConfig.utility.includes("Battery") ? 0x00E676 : 0xFF9100;
+                const packMat = new THREE.MeshStandardMaterial({ color: packColor, roughness: 0.3, metalness: 0.7 });
+                const pack = createOutlinedMesh(new THREE.BoxGeometry(0.7, 0.85, 0.35), packMat);
+                pack.position.set(0, 0, -0.6);
+                breathingRoot.add(pack);
+
+                if (currentConfig.utility.includes("Cooling")) {
+                    const pipeL = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.4, 8), glowingCyanMat);
+                    pipeL.rotation.z = Math.PI / 2;
+                    pipeL.position.set(-0.35, 0.1, -0.4);
+                    const pipeR = pipeL.clone();
+                    pipeR.position.set(0.35, 0.1, -0.4);
+                    breathingRoot.add(pipeL);
+                    breathingRoot.add(pipeR);
+                }
+            }
+
+            // 6. Mobility legs (NOT grouped inside breathingRoot so they stay anchored on the ground)
+            buildModularLegs(paintMat, darkMetalMat, goldMat, glowingCyanMat, glowingOrangeMat);
+        }
+
+        // Modular arm assembly
+        function buildModularArm(isLeft, type, paintMat, darkMetalMat, goldMat, glowingCyanMat, glowingOrangeMat) {
+            const sideSign = isLeft ? -1 : 1;
+            const armGroup = new THREE.Group();
+            armGroup.position.set(sideSign * 0.98, 0.4, 0);
+            breathingRoot.add(armGroup);
+
+            // Joints
+            const shoulder = new THREE.Mesh(new THREE.SphereGeometry(0.14, 12, 12), darkMetalMat);
+            armGroup.add(shoulder);
+
+            const upperArm = createOutlinedMesh(new THREE.CylinderGeometry(0.08, 0.07, 0.5, 8), paintMat);
+            upperArm.position.set(sideSign * 0.16, -0.22, 0);
+            upperArm.rotation.z = -sideSign * 0.25;
+            armGroup.add(upperArm);
+
+            const elbow = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 8), darkMetalMat);
+            elbow.position.set(sideSign * 0.25, -0.45, 0);
+            armGroup.add(elbow);
+
+            const foreArm = createOutlinedMesh(new THREE.CylinderGeometry(0.08, 0.07, 0.5, 8), paintMat);
+            foreArm.position.set(sideSign * 0.35, -0.68, 0);
+            foreArm.rotation.z = -sideSign * 0.12;
+            armGroup.add(foreArm);
+
+            // Tool tip endpoint
+            const toolPos = new THREE.Vector3(sideSign * 0.42, -0.92, 0.05);
+
+            if (type === "Laser Blaster" || type === "Plasma Cannon") {
+                const gun = createOutlinedMesh(new THREE.CylinderGeometry(0.08, 0.08, 0.4, 12), darkMetalMat);
+                gun.rotation.x = Math.PI / 2;
+                gun.position.copy(toolPos);
+                
+                const tip = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.08, 12), glowingCyanMat);
+                tip.rotation.x = Math.PI / 2;
+                tip.position.set(toolPos.x, toolPos.y, toolPos.z + 0.2);
+
+                armGroup.add(gun);
+                armGroup.add(tip);
+            } else if (type === "Drill Arm") {
+                const drillHolder = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.12, 0.15, 12), darkMetalMat);
+                drillHolder.position.copy(toolPos);
+                armGroup.add(drillHolder);
+
+                const drill = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.5, 12), goldMat);
+                drill.rotation.x = Math.PI / 2;
+                drill.position.set(toolPos.x, toolPos.y - 0.12, toolPos.z);
+                drill.name = "drill_tip";
+                armGroup.add(drill);
+            } else if (type === "Claw Arm" || type === "Grabber" || type === "Hammer") {
+                const base = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.15, 0.16), darkMetalMat);
+                base.position.copy(toolPos);
+                armGroup.add(base);
+
+                const pincer = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.03, 6, 12, Math.PI), goldMat);
+                pincer.position.set(toolPos.x, toolPos.y - 0.1, toolPos.z);
+                pincer.rotation.z = Math.PI / 2;
+                armGroup.add(pincer);
+            } else if (type === "Shield Arm") {
+                const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.02, 24), glowingCyanMat);
+                disc.rotation.x = Math.PI / 2;
+                disc.position.copy(toolPos);
+                disc.material.transparent = true;
+                disc.material.opacity = 0.45;
+                armGroup.add(disc);
+            } else { // Standard arm or empty
+                const wrist = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), darkMetalMat);
+                wrist.position.copy(toolPos);
+                armGroup.add(wrist);
+            }
+        }
+
+        // Modular leg base
+        function buildModularLegs(paintMat, darkMetalMat, goldMat, glowingCyanMat, glowingOrangeMat) {
+            const legGroup = new THREE.Group();
+            robotGroup.add(legGroup);
+
+            if (currentConfig.legs === "Heavy Tracks" || currentConfig.legs === "Tank Tracks") {
+                const treadGeo = new THREE.BoxGeometry(0.42, 0.8, 1.4);
+                const treadL = new THREE.Mesh(treadGeo, darkMetalMat);
+                treadL.position.set(-0.8, 0.4, 0);
+                const treadR = new THREE.Mesh(treadGeo, darkMetalMat);
+                treadR.position.set(0.8, 0.4, 0);
+
+                const axle = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.3, 0.5), paintMat);
+                axle.position.set(0, 0.6, 0);
+
+                legGroup.add(treadL);
+                legGroup.add(treadR);
+                legGroup.add(axle);
+
+            } else if (currentConfig.legs === "All-Terrain Wheels" || currentConfig.legs === "Wheels") {
+                const axle = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.15, 0.6), darkMetalMat);
+                axle.position.set(0, 0.4, 0);
+                legGroup.add(axle);
+
+                const tyreMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.95 });
+                const wheelL = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.25, 16), tyreMat);
+                wheelL.rotation.z = Math.PI / 2;
+                wheelL.position.set(-0.7, 0.4, 0);
+                wheelL.name = "wheel_L";
+
+                const wheelR = wheelL.clone();
+                wheelR.position.set(0.7, 0.4, 0);
+                wheelR.name = "wheel_R";
+
+                legGroup.add(wheelL);
+                legGroup.add(wheelR);
+
+            } else if (currentConfig.legs === "Hover Engine") {
+                const engine = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.3, 0.5, 16), darkMetalMat);
+                engine.position.set(0, 1.0, 0);
+                legGroup.add(engine);
+
+                const repulsor = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.04, 12), glowingCyanMat);
+                repulsor.position.set(0, 0.72, 0);
+                legGroup.add(repulsor);
+
+                const flame = new THREE.Mesh(new THREE.ConeGeometry(0.25, 0.7, 12, 1, true), glowingCyanMat);
+                flame.name = "thrust_flame";
+                flame.position.set(0, 0.4, 0);
+                flame.material.transparent = true;
+                flame.material.opacity = 0.6;
+                legGroup.add(flame);
+
+            } else if (currentConfig.legs === "Jetpack") {
+                const flameL = new THREE.Mesh(new THREE.ConeGeometry(0.12, 0.55, 8), glowingOrangeMat);
+                flameL.name = "jet_flame_L";
+                flameL.position.set(-0.55, 0.45, -0.2);
+                flameL.material.transparent = true;
+                flameL.material.opacity = 0.7;
+
+                const flameR = flameL.clone();
+                flameR.name = "jet_flame_R";
+                flameR.position.set(0.55, 0.45, -0.2);
+
+                legGroup.add(flameL);
+                legGroup.add(flameR);
+
+            } else { // Standard Legs or Spider Legs
+                const hip = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.2, 0.35), darkMetalMat);
+                hip.position.set(0, 0.85, 0);
+                legGroup.add(hip);
+
+                const thighL = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.06, 0.4, 8), paintMat);
+                thighL.position.set(-0.25, 0.6, 0);
+                const thighR = thighL.clone();
+                thighR.position.set(0.25, 0.6, 0);
+
+                const footL = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.08, 0.25), darkMetalMat);
+                footL.position.set(-0.25, 0.36, 0.04);
+                const footR = footL.clone();
+                footR.position.set(0.25, 0.36, 0.04);
+
+                legGroup.add(thighL);
+                legGroup.add(thighR);
+                legGroup.add(footL);
+                legGroup.add(footR);
+            }
+        }
+
+        // --- HAZARDS & OBSTACLE SPAWNER ---
+        function clearObstacles() {
+            obstaclesGroup.forEach(obj => scene.remove(obj));
+            obstaclesGroup = [];
+        }
+
+        function spawnObstaclesForHazard(type) {
+            clearObstacles();
+            if (type === "none") return;
+
+            // Map standard obstacle position at center of highway runway (Z = 0)
+            const obsZ = 0.0;
+
+            if (type === "lava") {
+                // Large flowing red lava floor plate across runway
+                const lavaGeo = new THREE.BoxGeometry(15.8, 0.15, 35);
+                const lavaMat = new THREE.MeshBasicMaterial({ color: 0xFF2200 });
+                const lava = new THREE.Mesh(lavaGeo, lavaMat);
+                lava.position.set(0, 0.04, obsZ);
+                scene.add(lava);
+                obstaclesGroup.push(lava);
+
+                // Add small rock slabs in the lava to jump on
+                const rockMat = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9 });
+                const rockL = createOutlinedMesh(new THREE.BoxGeometry(3, 0.5, 3), rockMat);
+                rockL.position.set(-3, 0.2, obsZ);
+                const rockR = createOutlinedMesh(new THREE.BoxGeometry(3, 0.5, 3), rockMat);
+                rockR.position.set(3, 0.2, obsZ);
+
+                scene.add(rockL);
+                scene.add(rockR);
+                obstaclesGroup.push(rockL, rockR);
+
+            } else if (type === "river") {
+                // Flowing cyan/blue rushing river plate
+                const riverGeo = new THREE.BoxGeometry(15.8, 0.1, 28);
+                const riverMat = new THREE.MeshBasicMaterial({ color: 0x00A2FF });
+                const river = new THREE.Mesh(riverGeo, riverMat);
+                river.position.set(0, 0.04, obsZ);
+                scene.add(river);
+                obstaclesGroup.push(river);
+
+            } else if (type === "wall") {
+                // Giant heavy industrial concrete barricade block
+                const wallGeo = new THREE.BoxGeometry(15.8, 6.0, 4.0);
+                const wallMat = new THREE.MeshStandardMaterial({ color: 0x424957, roughness: 0.8, metalness: 0.1 });
+                const barricade = createOutlinedMesh(wallGeo, wallMat);
+                barricade.position.set(0, 3.0, obsZ);
+                scene.add(barricade);
+                obstaclesGroup.push(barricade);
+
+                // Add glowing orange warns stripes on concrete
+                const stripeMat = new THREE.MeshBasicMaterial({ color: 0xFF9100 });
+                for(let x = -6; x <= 6; x += 3) {
+                    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.8, 5.8, 4.1), stripeMat);
+                    stripe.position.set(x, 3.0, obsZ);
+                    stripe.rotation.z = Math.PI / 6;
+                    scene.add(stripe);
+                    obstaclesGroup.push(stripe);
+                }
+
+            } else if (type === "laser") {
+                // Red glowing laser nodes and horizontal grid lines
+                const colGeo = new THREE.CylinderGeometry(0.4, 0.4, 8, 8);
+                const colMat = new THREE.MeshStandardMaterial({ color: 0x222633 });
+                const colL = createOutlinedMesh(colGeo, colMat);
+                colL.position.set(-7.5, 4, obsZ);
+                const colR = createOutlinedMesh(colGeo, colMat);
+                colR.position.set(7.5, 4, obsZ);
+
+                scene.add(colL);
+                scene.add(colR);
+                obstaclesGroup.push(colL, colR);
+
+                // Laser grid horizontal bars (flashing in tick)
+                const beamGeo = new THREE.CylinderGeometry(0.06, 0.06, 14.8, 8);
+                beamGeo.rotateZ(Math.PI / 2);
+                const beamMat = new THREE.MeshBasicMaterial({ color: 0xFF0033 });
+
+                const laser1 = new THREE.Mesh(beamGeo, beamMat);
+                laser1.position.set(0, 2, obsZ);
+                const laser2 = new THREE.Mesh(beamGeo, beamMat);
+                laser2.position.set(0, 4.5, obsZ);
+                const laser3 = new THREE.Mesh(beamGeo, beamMat);
+                laser3.position.set(0, 7, obsZ);
+
+                scene.add(laser1);
+                scene.add(laser2);
+                scene.add(laser3);
+                obstaclesGroup.push(laser1, laser2, laser3);
+
+            } else if (type === "box") {
+                // Heavy metal cargo crate blocking the portal
+                const crateGeo = new THREE.BoxGeometry(4, 4, 4);
+                const crateMat = new THREE.MeshStandardMaterial({ color: 0x7E57C2, roughness: 0.5, metalness: 0.8 });
+                const crate = createOutlinedMesh(crateGeo, crateMat);
+                crate.position.set(0, 2, obsZ - 10); // place slightly ahead
+                crate.name = "cargo_box";
+                scene.add(crate);
+                obstaclesGroup.push(crate);
+            }
+        }
+
+        // --- PARTICLE EMITTER AND CRASH SYSTEMS ---
+        function spawnBlastParticles(posX, posY, posZ, colorHex) {
+            const count = 40;
+            const mat = new THREE.MeshBasicMaterial({ color: colorHex, transparent: true, opacity: 0.95 });
+            const pGeo = new THREE.BoxGeometry(0.15, 0.15, 0.15);
+
+            for (let i = 0; i < count; i++) {
+                const mesh = new THREE.Mesh(pGeo, mat);
+                mesh.position.set(
+                    posX + (Math.random() - 0.5) * 1.5,
+                    posY + (Math.random() - 0.5) * 1.5,
+                    posZ + (Math.random() - 0.5) * 1.5
+                );
+
+                const velocity = new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.4,
+                    (Math.random() * 0.5) + 0.1,
+                    (Math.random() - 0.5) * 0.4
+                );
+
+                scene.add(mesh);
+                particles.push({ mesh: mesh, vel: velocity, life: 1.0 });
+            }
+        }
+
+        function updateBlastParticles(delta) {
+            for (let i = particles.length - 1; i >= 0; i--) {
+                const p = particles[i];
+                p.mesh.position.add(p.vel);
+                p.vel.y -= 0.01; // gravity
+                p.life -= delta * 1.8;
+                p.mesh.material.opacity = p.life;
+                p.mesh.scale.set(p.life, p.life, p.life);
+
+                if (p.life <= 0) {
+                    scene.remove(p.mesh);
+                    particles.splice(i, 1);
+                }
+            }
+        }
+
+        // --- OUTSIDE KOTLIN BRIDGE INTERFACE ---
+        window.updateRobotState = function(
+            x, y, z, speed, paintHex, eyes, hat,
+            legs, leftArm, rightArm, utility, hazard, progress, status
+        ) {
+            const configChanged = (
+                currentConfig.paint !== paintHex ||
+                currentConfig.eyes !== eyes ||
+                currentConfig.hat !== hat ||
+                currentConfig.legs !== legs ||
+                currentConfig.leftArm !== leftArm ||
+                currentConfig.rightArm !== rightArm ||
+                currentConfig.utility !== utility
+            );
+
+            const hazardChanged = (currentConfig.hazard !== hazard);
+
+            // Update parameters
+            currentConfig.paint = paintHex;
+            currentConfig.eyes = eyes;
+            currentConfig.hat = hat;
+            currentConfig.legs = legs;
+            currentConfig.leftArm = leftArm;
+            currentConfig.rightArm = rightArm;
+            currentConfig.utility = utility;
+            currentConfig.hazard = hazard;
+            currentConfig.progress = progress;
+            currentConfig.status = status;
+            currentConfig.speed = speed;
+
+            // Physical mapping of 2D coordinates to 3D track path:
+            // The arena tracks Z-axis from Z = 200 (progress = 0.0) down to Z = -200 (progress = 1.0)
+            currentConfig.posX = x * 0.15;
+            // Elevate robot if hovering or flying
+            currentConfig.posY = (legs === "Hover Engine" || legs === "Jetpack") ? 
+                                 (1.2 + Math.sin(Date.now() * 0.005) * 0.15) : (y * 0.1);
+            currentConfig.posZ = 200 - (progress * 400);
+
+            // Trigger updates
+            if (configChanged || !breathingRoot) {
+                rebuildRobotMesh();
+            }
+
+            if (hazardChanged) {
+                spawnObstaclesForHazard(hazard);
+            }
+
+            // Sync visual HUD indicators
+            document.getElementById('hud-chassis').innerText = "FUSION FRAME";
+            document.getElementById('hud-mobility').innerText = legs.toUpperCase();
+            document.getElementById('hud-left-arm').innerText = leftArm.toUpperCase();
+            document.getElementById('hud-right-arm').innerText = rightArm.toUpperCase();
+            document.getElementById('hud-utility').innerText = utility.toUpperCase();
+            document.getElementById('hud-progress').innerText = (progress * 100).toFixed(1) + "%";
+
+            const statusEl = document.getElementById('hud-status');
+            statusEl.innerText = status.toUpperCase();
+            if (status === "success") {
+                statusEl.style.color = "#00FF33";
+                // Spawn fireworks victory trails!
+                if (Math.random() < 0.25) {
+                    spawnBlastParticles(currentConfig.posX, currentConfig.posY + 2, currentConfig.posZ, 0x00FF88);
+                    spawnBlastParticles(currentConfig.posX, currentConfig.posY + 2, currentConfig.posZ, 0xFF007F);
+                }
+            } else if (status === "failure") {
+                statusEl.style.color = "#FF0033";
+                // Spawn violent explosion smoke!
+                if (particles.length < 5) {
+                    spawnBlastParticles(currentConfig.posX, currentConfig.posY + 1, currentConfig.posZ, 0xFF3300);
+                }
+            } else if (status === "running") {
+                statusEl.style.color = "#00F0FF";
+            } else {
+                statusEl.style.color = "#FFC107";
+            }
+
+            const scanIndicator = document.getElementById('scanning-indicator');
+            scanIndicator.style.display = (status === "running") ? "block" : "none";
+        };
+
+        // --- CAMERA UPDATE SYSTEM ---
+        function updateCamera(delta) {
+            if (!robotGroup) return;
+
+            const targetY = currentConfig.posY;
+            const targetZ = currentConfig.posZ;
+            const targetX = currentConfig.posX;
+
+            if (cameraMode === 'chase') {
+                // Dynamic camera chase behind the robot
+                const idealCamX = targetX;
+                const idealCamY = targetY + 5.5;
+                const idealCamZ = targetZ + 15;
+
+                camera.position.x += (idealCamX - camera.position.x) * 0.12;
+                camera.position.y += (idealCamY - camera.position.y) * 0.12;
+                camera.position.z += (idealCamZ - camera.position.z) * 0.12;
+                camera.lookAt(targetX, targetY + 1.2, targetZ);
+
+            } else if (cameraMode === 'orbit') {
+                // Drag controlled free Orbit view
+                const oX = targetX + orbitDist * Math.sin(orbitAngleX) * Math.cos(orbitAngleY);
+                const oY = targetY + orbitDist * Math.sin(orbitAngleY) + 1.0;
+                const oZ = targetZ + orbitDist * Math.cos(orbitAngleX) * Math.cos(orbitAngleY);
+
+                camera.position.set(oX, oY, oZ);
+                camera.lookAt(targetX, targetY + 1.2, targetZ);
+
+            } else if (cameraMode === 'cockpit') {
+                // Locked directly inside the visor
+                camera.position.set(targetX, targetY + 1.15, targetZ + 0.25);
+                camera.lookAt(targetX, targetY + 1.1, targetZ - 50);
+
+            } else if (cameraMode === 'side') {
+                // Tracking profile visualizer from the side
+                camera.position.set(targetX + 16, targetY + 3.0, targetZ);
+                camera.lookAt(targetX, targetY + 1.2, targetZ);
+            }
+        }
+
+        // --- MAIN GAME TICK LOOP ---
+        function animate() {
+            requestAnimationFrame(animate);
+
+            const now = performance.now();
+            const delta = (now - lastTime) / 1000;
+            lastTime = now;
+
+            // Increment rotational speeds
+            const speedCoeff = currentConfig.status === "running" ? currentConfig.speed : 0.05;
+            runningTimers.drillRot += delta * 20 * speedCoeff;
+            runningTimers.fanRot += delta * 12 * speedCoeff;
+            runningTimers.radarRot += delta * 2;
+            runningTimers.treadOffset += delta * 3 * speedCoeff;
+
+            // 1. Move robot smoothly
+            if (robotGroup) {
+                robotGroup.position.x += (currentConfig.posX - robotGroup.position.x) * 0.15;
+                robotGroup.position.y += (currentConfig.posY - robotGroup.position.y) * 0.15;
+                robotGroup.position.z += (currentConfig.posZ - robotGroup.position.z) * 0.15;
+
+                // Breathing animation for floaters or running sequence
+                if (breathingRoot) {
+                    if (currentConfig.status === "running") {
+                        breathingRoot.position.y = (currentConfig.legs.includes("Hover") || currentConfig.legs.includes("Jet")) ?
+                            (2.0 + Math.sin(now * 0.008) * 0.18) : (1.6 + Math.abs(Math.sin(now * 0.015)) * 0.25);
+                    } else {
+                        // Subtle floating breathing
+                        breathingRoot.position.y += (Math.sin(now * 0.002) * 0.002);
+                    }
+                }
+
+                // Spin custom drills
+                const drillNode = robotGroup.getObjectByName("drill_tip");
+                if (drillNode) {
+                    drillNode.rotation.y = runningTimers.drillRot;
+                }
+
+                // Flame scaling
+                const thrustNode = robotGroup.getObjectByName("thrust_flame");
+                if (thrustNode) {
+                    const scale = 0.85 + Math.sin(now * 0.06) * 0.15;
+                    thrustNode.scale.set(scale, scale, scale);
+                }
+
+                // Left/Right jetpack flame scaling
+                const flameL = robotGroup.getObjectByName("jet_flame_L");
+                if (flameL) {
+                    const scale = 0.8 + Math.sin(now * 0.05) * 0.2;
+                    flameL.scale.set(scale, scale, scale);
+                }
+                const flameR = robotGroup.getObjectByName("jet_flame_R");
+                if (flameR) {
+                    const scale = 0.8 + Math.cos(now * 0.05) * 0.2;
+                    flameR.scale.set(scale, scale, scale);
+                }
+            }
+
+            // 2. Stars scrolling drift backwards during running simulator
+            if (starfield) {
+                const scrollSpeed = (currentConfig.status === "running") ? (0.015 * currentConfig.speed) : 0.001;
+                starfield.rotation.y += scrollSpeed * 0.03;
+                starfield.rotation.z += scrollSpeed * 0.01;
+            }
+
+            // 3. Update crash/victory particle trails
+            updateBlastParticles(delta);
+
+            // 4. Update cameras
+            updateCamera(delta);
+
+            // 5. Render
+            renderer.render(scene, camera);
+        }
+
+        // Start WebGL execution
+        init();
+        animate();
+    </script>
+</body>
+</html>
